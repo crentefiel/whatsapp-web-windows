@@ -1,9 +1,9 @@
 'use strict';
 const $=id=>document.getElementById(id);
-let selected=null,chats=[],queue=false;
+let selected=null,chats=[],reloading=false,pendingStatus=false,pendingConversations=false;
 function error(message){$('error').textContent=String(message||'').slice(0,220);}
 function readable(jid){return String(jid||'').split('@')[0];}
-function dateString(ms){return new Date(Number(ms)||Date.now()).toLocaleString('pt-BR');}
+function dateString(ms){const value=typeof ms==='string'&&ms.includes('T')?Date.parse(ms):Number(ms);return new Date(Number.isFinite(value)?value:Date.now()).toLocaleString('pt-BR');}
 async function status(){
  try{
    const s=await window.whatsapp.status();
@@ -60,16 +60,24 @@ async function messages(){
      if(m.participant&&m.participant!==m.jid){const sender=document.createElement('div');sender.className='sender';sender.textContent=readable(m.participant);div.append(sender);}
      if(m.body){const body=document.createElement('div');body.textContent=m.body;div.append(body);}
      const media=mediaElement(m);if(media)div.append(media);
-     if(m.media_kind&&!media){const missing=document.createElement('em');missing.textContent='[Mídia não disponível]';div.append(missing);}
+     if(['image','audio','video','document','sticker'].includes(m.kind)&&!media){const missing=document.createElement('em');missing.textContent='[Mídia não disponível]';div.append(missing);}
      const time=document.createElement('small');time.textContent=dateString(m.timestamp);div.append(time);frag.append(div);
    }
    $('messages').replaceChildren(frag);$('messages').scrollTop=$('messages').scrollHeight;
  }catch(e){error(e.message);}
 }
 async function reload(kind){
- if(queue)return;queue=true;
- try{if(kind==='status')await status();else{await conversations();await messages();await status();}}
- finally{queue=false;}
+ if(kind==='status')pendingStatus=true;else pendingConversations=true;
+ if(reloading)return;
+ reloading=true;
+ try{
+   while(pendingStatus||pendingConversations){
+     const needConversations=pendingConversations;
+     pendingStatus=false;pendingConversations=false;
+     if(needConversations){await conversations();await messages();}
+     await status();
+   }
+ }finally{reloading=false;}
 }
 $('connect').addEventListener('click',async()=>{error('');try{await window.whatsapp.start();await status();}catch(e){error(e.message);}});
 $('search').addEventListener('input',renderChats);
