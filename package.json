@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-web-windows",
-  "version": "0.1.0",
-  "description": "Aplicativo Windows para acessar o WhatsApp Web oficial, sem IA",
+  "version": "0.2.0",
+  "description": "WhatsApp Desktop independente com Baileys, histórico SQLite e envio de mídias",
   "private": true,
   "main": "src/main.cjs",
   "author": "Grafica do Sorriso",
@@ -9,33 +9,23 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
+    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/core/wa-client.cjs && node --check src/core/database.cjs && node --check src/core/messages.cjs && node --check src/ui.js",
     "package:windows": "electron-builder --win nsis --x64 --publish never"
   },
-  "devDependencies": {
-    "electron": "45.4.1",
-    "electron-builder": "^26.0.12"
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "mime-types": "^3.0.1",
+    "pino": "^9.7.0",
+    "qrcode": "^1.5.4"
   },
+  "devDependencies": {"electron": "45.4.1", "electron-builder": "^26.0.12"},
   "build": {
     "appId": "com.graficadosorriso.whatsappweb",
-    "productName": "WhatsApp Web - Grafica do Sorriso",
+    "productName": "WhatsApp Desktop - Grafica do Sorriso",
     "asar": true,
-    "files": [
-      "src/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "output": "release"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false,
-      "deleteAppDataOnUninstall": false
-    }
+    "files": ["src/**/*", "package.json"],
+    "directories": {"output": "release"},
+    "win": {"target": ["nsis"]},
+    "nsis": {"oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false, "deleteAppDataOnUninstall": false}
   }
 }
