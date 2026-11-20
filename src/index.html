@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; media-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>WhatsApp Desktop — Gráfica do Sorriso</title><link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<main id="app">
+ <aside>
+  <header><h1>WhatsApp Desktop</h1><span class="subtitle">Gráfica do Sorriso · Baileys</span></header>
+  <div class="connection">
+   <div class="conn-head"><strong id="state">Desconectado</strong><button id="connect">Conectar WhatsApp</button></div>
+   <div id="qrcode" hidden><p>No celular, abra <b>Dispositivos conectados → Conectar dispositivo</b> e escaneie:</p><img id="qr" alt="QR Code de pareamento"></div>
+   <p id="detail" class="small"></p><p id="health" class="small"></p>
+  </div>
+  <label class="search-label">Buscar conversa<input id="search" type="search" placeholder="Nome ou identificador"></label>
+  <div id="conversations" class="conversations" role="list"></div>
+ </aside>
+ <section class="chat">
+  <header class="chat-head"><div id="contactPhoto" class="avatar">◉</div>
+   <div><strong id="contactTitle">Selecione uma conversa</strong><div id="contactJid" class="small"></div></div>
+   <button id="refreshPhoto" hidden>Atualizar foto</button>
+  </header>
+  <div id="messages" class="messages" role="log" aria-live="polite">
+   <div class="welcome">Primeiro conecte pelo QR Code. Depois envie um “oi” de outro telefone para testar o recebimento real.</div>
+  </div>
+  <div class="compose">
+   <form id="sendForm"><input id="messageInput" maxlength="65536" placeholder="Digite uma mensagem" disabled><button id="sendButton" disabled>Enviar</button></form>
+   <div class="attachments"><select id="attachmentType" disabled aria-label="Tipo de arquivo">
+    <option value="image">Imagem</option><option value="video">Vídeo</option><option value="audio">Áudio</option><option value="document">Documento</option>
+   </select><button id="sendFile" disabled>Enviar arquivo</button><span id="error" class="small" role="status"></span></div>
+  </div>
+ </section>
+</main><script src="./ui.js"></script>
+</body></html>
