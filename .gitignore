@@ -12,4 +12,5 @@ dist/
 **/*.sqlite-shm
 **/Session Storage/
 **/Local Storage/
+**/media/
 .DS_Store

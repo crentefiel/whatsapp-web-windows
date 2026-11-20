@@ -1,25 +1,17 @@
-name: Verificação do projeto
-
+name: Testes da base WhatsApp
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/baileys-client-foundation']
   pull_request:
-
 jobs:
-  testes:
-    name: Sintaxe e testes locais (Windows)
-    runs-on: windows-latest
+  teste:
+    runs-on: ubuntu-latest
     steps:
-      - name: Baixar código
-        uses: actions/checkout@v4
-      - name: Preparar Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Verificar sintaxe
-        run: |
-          node --check src/main.cjs
-          node --check src/security.cjs
-          node --check test/security.test.cjs
-      - name: Executar testes
+        run: npm run check
+      - name: Testar código, mensagens e SQLite
         run: npm test
