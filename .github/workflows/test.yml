@@ -1,0 +1,25 @@
+name: Verificação do projeto
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    name: Sintaxe e testes locais (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verificar sintaxe
+        run: |
+          node --check src/main.cjs
+          node --check src/security.cjs
+          node --check test/security.test.cjs
+      - name: Executar testes
+        run: npm test
