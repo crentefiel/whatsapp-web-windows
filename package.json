@@ -1,0 +1,41 @@
+{
+  "name": "whatsapp-web-windows",
+  "version": "0.1.0",
+  "description": "Aplicativo Windows para acessar o WhatsApp Web oficial, sem IA",
+  "private": true,
+  "main": "src/main.cjs",
+  "author": "Grafica do Sorriso",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "package:windows": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "45.4.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.graficadosorriso.whatsappweb",
+    "productName": "WhatsApp Web - Grafica do Sorriso",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}
