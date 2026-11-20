@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
+const {isAllowedJid}=require('./messages.cjs');
 class Store {
   constructor(folder){
     fs.mkdirSync(folder,{recursive:true});
@@ -17,8 +18,10 @@ class Store {
     this.insertMsgStmt=this.db.prepare(`INSERT OR IGNORE INTO messages(jid,id,participant,from_me,timestamp,kind,body,quoted_id,media_id) VALUES(?,?,?,?,?,?,?,?,?)`);
     this.hasStmt=this.db.prepare('SELECT 1 AS found FROM messages WHERE jid=? AND id=? AND participant=?');
   }
-  contact(jid,name='',timestamp=0){this.upsertContactStmt.run(jid,String(name).slice(0,200),Number(timestamp)||0);}
+  contact(jid,name='',timestamp=0){if(!isAllowedJid(jid))return;this.upsertContactStmt.run(jid,String(name).slice(0,200),Number(timestamp)||0);}
   has(m){return !!this.hasStmt.get(m.jid,m.id,m.participant);}
+  linkedMedia(m){return this.db.prepare('SELECT media_id FROM messages WHERE jid=? AND id=? AND participant=?').get(m.jid,m.id,m.participant)?.media_id||null;}
+  linkMedia(m,id){return this.db.prepare('UPDATE messages SET media_id=? WHERE jid=? AND id=? AND participant=? AND media_id IS NULL').run(id,m.jid,m.id,m.participant).changes>0;}
   save(m,mediaId=null){
     if(this.has(m))return false;
     this.db.exec('BEGIN');
@@ -35,7 +38,7 @@ class Store {
     (SELECT body FROM messages WHERE jid=c.jid ORDER BY timestamp DESC,id DESC LIMIT 1) AS preview,
     (SELECT kind FROM messages WHERE jid=c.jid ORDER BY timestamp DESC,id DESC LIMIT 1) AS preview_kind,
     (SELECT COUNT(*) FROM messages WHERE jid=c.jid) AS count
-    FROM contacts c ORDER BY c.last_seen DESC LIMIT ?`).all(limit);}
+    FROM contacts c WHERE (c.jid GLOB '*@s.whatsapp.net' OR c.jid GLOB '*@lid') ORDER BY c.last_seen DESC LIMIT ?`).all(limit);}
   messages(jid,limit=200){return this.db.prepare(`SELECT m.*,d.filename,d.mime,d.kind AS media_kind FROM messages m
     LEFT JOIN media d ON d.id=m.media_id WHERE m.jid=? ORDER BY m.timestamp DESC,m.id DESC LIMIT ?`).all(jid,limit).reverse();}
   close(){this.db.close();}

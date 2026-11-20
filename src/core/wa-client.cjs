@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto');
 const {normalizeMessage,isAllowedJid,MEDIA_LIMIT}=require('./messages.cjs');
+const {relativeMediaPath}=require('./media-files.cjs');
 class WhatsAppClient{
   constructor({dataDir,store,changed}){
     this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;
@@ -35,8 +36,8 @@ class WhatsAppClient{
       sock.ev.on('messages.upsert',({messages})=>this.ingest(messages,'tempo_real',sock));
       sock.ev.on('messaging-history.set',({contacts=[],chats=[],messages=[]})=>{
         try{
-          for(const c of contacts)if(c.id)this.store.contact(c.id,c.name||c.notify||'');
-          for(const c of chats)if(c.id)this.store.contact(c.id,c.name||'',Number(c.conversationTimestamp||0)*1000);
+          for(const c of contacts)if(isAllowedJid(c.id))this.store.contact(c.id,c.name||c.notify||'');
+          for(const c of chats)if(isAllowedJid(c.id))this.store.contact(c.id,c.name||'',Number(c.conversationTimestamp||0)*1000);
           this.changed('conversas');
         }catch(e){this.reportError('historico_contatos',e);}
         this.ingest(messages,'historico',sock);
@@ -47,14 +48,16 @@ class WhatsAppClient{
     finally{this.starting=false;}
   }
   scheduleRetry(){if(this.retryTimer||this.closed)return;this.retryTimer=setTimeout(()=>{this.retryTimer=null;this.start();},5000);}
-  onContacts(contacts){try{for(const c of contacts||[])if(c.id)this.store.contact(c.id,c.name||c.notify||c.verifiedName||'');this.changed('conversas');}
+  onContacts(contacts){try{for(const c of contacts||[])if(isAllowedJid(c.id))this.store.contact(c.id,c.name||c.notify||c.verifiedName||'');this.changed('conversas');}
     catch(e){this.reportError('contatos',e);}}
   reportError(where,e){this.status.errors++;this.update({detail:'Erro em '+where+': '+String(e.message||e).slice(0,180)});}
   async ingest(messages,source,sock){
     for(const raw of messages||[]){
       const m=normalizeMessage(raw);if(!m)continue;
       this.update({lastEvent:new Date().toISOString()});
-      if(this.store.has(m))continue;
+      const exists=this.store.has(m);
+      // Se houve falha anterior no anexo, tente novamente quando o evento reaparecer.
+      if(exists&&(!m.media||this.store.linkedMedia(m)))continue;
       try{
         let mediaId=null;
         if(m.media&&m.media.size<=MEDIA_LIMIT){
@@ -62,15 +65,19 @@ class WhatsAppClient{
             const b=await import('@whiskeysockets/baileys');
             const buf=await b.downloadMediaMessage(raw,'buffer',{}, {logger:this.logger,reuploadRequest:sock.updateMediaMessage});
             if(buf.length<=MEDIA_LIMIT){
-              const id=crypto.randomUUID(),relativePath=path.join('media',id),mediaDir=path.join(this.dataDir,'media');
-              await fs.mkdir(mediaDir,{recursive:true});
+              const id=crypto.randomUUID(),relativePath=relativeMediaPath({jid:m.jid,kind:m.media.kind,id,filename:m.media.filename});
+              await fs.mkdir(path.dirname(path.join(this.dataDir,relativePath)),{recursive:true});
               await fs.writeFile(path.join(this.dataDir,relativePath),buf,{flag:'wx'});
               this.store.saveMedia({id,filename:m.media.filename,mime:m.media.mime,kind:m.media.kind,relativePath,size:buf.length});
               mediaId=id;
             }
           }catch(e){this.reportError('download_midia',e);}
         }
-        if(this.store.save(m,mediaId)){
+        if(exists){
+          if(mediaId&&this.store.linkMedia(m,mediaId)){
+            this.update({lastSaved:new Date().toISOString()});this.changed('conversas');
+          }
+        }else if(this.store.save(m,mediaId)){
           this.status.received++;this.update({lastSaved:new Date().toISOString()});this.changed('conversas');
         }
       }catch(e){this.reportError('persistencia_'+source,e);}

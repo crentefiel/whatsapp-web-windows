@@ -29,12 +29,13 @@ function mediaFrom(c){
 }
 function normalizeMessage(m){
   const key=m?.key||{},jid=typeof key.remoteJid==='string'?key.remoteJid:'',id=typeof key.id==='string'?key.id:'';
-  if(!jid||!id||jid==='status@broadcast'||!m.message||/@newsletter$/.test(jid))return null;
+  if(!isAllowedJid(jid)||!id||!m.message)return null;
   const c=unwrap(m.message),media=mediaFrom(c),text=textFrom(c);
   const type=media?.kind||(c.reactionMessage?'reaction':c.protocolMessage?'protocol':'text');
   const quotedId=c.extendedTextMessage?.contextInfo?.stanzaId||c.imageMessage?.contextInfo?.stanzaId||c.videoMessage?.contextInfo?.stanzaId||null;
   return{id,jid,participant:String(key.participant||''),fromMe:!!key.fromMe,senderName:String(m.pushName||'').slice(0,200),
     timestamp:unixMs(m.messageTimestamp),type,text:type==='reaction'?(c.reactionMessage?.text||''):text,quotedId,media};
 }
-function isAllowedJid(jid){return typeof jid==='string'&&jid.length<=160&&/^(?:\d+@s\.whatsapp\.net|[a-zA-Z0-9_.-]+@lid|\d+-\d+@g\.us)$/.test(jid);}
+// Apenas contatos individuais; Baileys pode incluir um índice de dispositivo no JID.
+function isAllowedJid(jid){return typeof jid==='string'&&jid.length<=160&&/^(?:\d+(?::\d+)?@s\.whatsapp\.net|[a-zA-Z0-9_.:-]+@lid)$/.test(jid);}
 module.exports={normalizeMessage,isAllowedJid,MEDIA_LIMIT,unwrap};

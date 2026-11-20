@@ -4,6 +4,7 @@ const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('n
 const {Store}=require('./core/database.cjs');
 const {WhatsAppClient}=require('./core/wa-client.cjs');
 const {isAllowedJid}=require('./core/messages.cjs');
+const {resolveStoredMedia}=require('./core/media-files.cjs');
 protocol.registerSchemesAsPrivileged([{scheme:'sorriso',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 let window=null,store=null,client=null;
 if(!app.requestSingleInstanceLock())app.quit();
@@ -18,12 +19,7 @@ function ownRenderer(event){
  if(!window||event.sender!==window.webContents||!event.senderFrame||event.senderFrame.url!=='sorriso://local/index.html')throw Error('Origem não autorizada');
 }
 function api(channel,fn){ipcMain.handle(channel,(e,...args)=>{ownRenderer(e);return fn(...args);});}
-function mediaPath(media){
- if(!media||!/^media[/\\][0-9a-f-]{36}$/.test(media.relative_path))return null;
- const resolved=path.resolve(app.getPath('userData'),media.relative_path);
- const root=path.resolve(app.getPath('userData'),'media')+path.sep;
- return resolved.startsWith(root)?resolved:null;
-}
+function mediaPath(media){return media?resolveStoredMedia(app.getPath('userData'),media.relative_path):null;}
 async function startApp(){
  const dataDir=app.getPath('userData');store=new Store(dataDir);
  client=new WhatsAppClient({dataDir,store,changed});
@@ -54,7 +50,7 @@ async function startApp(){
  });
  api('whatsapp:saveMedia',async id=>{
    if(typeof id!=='string'||!/^[0-9a-f-]{36}$/.test(id))throw Error('Arquivo inválido');
-   const media=store.getMedia(id),source=mediaPath(media);if(!source)throw Error('Arquivo não encontrado');
+   const media=store.getMedia(id),source=mediaPath(media);if(!source||!fs.existsSync(source))throw Error('Arquivo não encontrado no computador');
    const picked=await dialog.showSaveDialog(window,{defaultPath:path.join(app.getPath('downloads'),media.filename),title:'Salvar arquivo recebido'});
    if(picked.canceled||!picked.filePath)return{canceled:true};
    fs.copyFileSync(source,picked.filePath);return{saved:true};

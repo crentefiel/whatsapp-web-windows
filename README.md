@@ -62,3 +62,11 @@ O GitHub Actions compila o instalador como artefato nas execuções corresponden
 ### Privacidade e segurança
 
 O repositório é **público** e contém apenas código. Nunca adicionar QR Code, sessão, chaves, banco SQLite, logs privados ou mensagens de clientes. Não vincular duas instâncias Baileys simultaneamente com as mesmas credenciais. Projeto independente e não afiliado à Meta ou WhatsApp.
+
+### Correção de contatos e arquivos locais
+
+A lista mostra somente conversas individuais (`@s.whatsapp.net` e `@lid`); grupos, canais, comunidades e status são ignorados. O aplicativo preserva os IDs internos em vez de inventar números.
+
+Os arquivos recebidos ficam no disco local em `userData/media/contatos/<numero>/documentos`, `fotos`, `audios`, `videos` ou `figurinhas`. Para contatos identificados apenas por ID interno usa-se `LID-<id>`. Anexos das versões anteriores em `userData/media/<uuid>` continuam acessíveis. Se o download falhar, o histórico da mensagem é mantido, e a recuperação será tentada se o evento reaparecer. Nenhuma sessão ou conversa deve ser publicada no GitHub.
+
+A validação com WhatsApp real no Windows ainda é necessária para envio de texto e arquivos, recebimento e reabertura após reinício.
