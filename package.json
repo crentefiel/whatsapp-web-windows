@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "package:windows": "electron-builder --win nsis --x64"
+    "package:windows": "electron-builder --win nsis --x64 --publish never"
   },
   "devDependencies": {
     "electron": "45.4.1",
