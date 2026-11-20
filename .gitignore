@@ -1,0 +1,15 @@
+node_modules/
+release/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+**/baileys_auth/
+**/.baileys_auth/
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/Session Storage/
+**/Local Storage/
+.DS_Store
