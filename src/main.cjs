@@ -33,7 +33,8 @@ async function startApp(){
      const id=url.pathname.slice(7);if(!/^[0-9a-f-]{36}$/.test(id))return new Response('Not found',{status:404});
      const media=store.getMedia(id),local=mediaPath(media);
      if(!local||!fs.existsSync(local))return new Response('Not found',{status:404});
-     return net.fetch(pathToFileURL(local).toString());
+     const response=await net.fetch(pathToFileURL(local).toString());
+     return new Response(response.body,{status:response.status,headers:{'Content-Type':media.mime||'application/octet-stream','X-Content-Type-Options':'nosniff'}});
    }
    const allowed={'/index.html':'index.html','/ui.js':'ui.js','/style.css':'style.css'};
    if(!allowed[url.pathname])return new Response('Not found',{status:404});
