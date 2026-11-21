@@ -27,6 +27,36 @@
      <p id="detail" class="small"></p><p id="health" class="small"></p><button id="copyDiagnostics" type="button" class="diagnostics-button">Copiar diagnóstico</button>
     </div>
    </div>
+
+   <div class="settings-group ai-settings">
+    <h3>Inteligência artificial</h3>
+    <p class="small">API compatível com OpenAI. A IA fica desligada até você configurar e ativar. Somente contatos que você autorizar recebem respostas automáticas. Mensagens selecionadas serão enviadas à API que você informar.</p>
+    <form id="aiForm" class="ai-form">
+      <label>URL base da API
+        <input id="aiBaseUrl" type="url" placeholder="https://api.openai.com/v1" required autocomplete="off">
+      </label>
+      <label>Nome do modelo
+        <input id="aiModel" type="text" placeholder="Nome exato do modelo no seu provedor" maxlength="120" required autocomplete="off">
+      </label>
+      <label>Chave da API
+        <input id="aiApiKey" type="password" placeholder="Deixe vazio para manter a chave salva" maxlength="1000" autocomplete="new-password">
+      </label>
+      <p id="aiKeyStatus" class="small">Nenhuma chave configurada.</p>
+      <label>Instruções para a IA
+        <textarea id="aiPrompt" rows="5" maxlength="4000"></textarea>
+      </label>
+      <label class="ai-check">
+        <input id="aiEnabled" type="checkbox">
+        Ativar respostas automáticas para contatos autorizados
+      </label>
+      <p id="aiAllowedCount" class="small">Contatos autorizados: 0</p>
+      <div class="ai-actions">
+        <button id="aiSave" type="submit">Salvar configurações da IA</button>
+        <button id="aiClearKey" type="button" class="secondary-action">Apagar chave salva</button>
+      </div>
+      <p id="aiResult" class="small" role="status"></p>
+    </form>
+   </div>
   </section>
   <label class="search-label">Buscar conversa<input id="search" type="search" placeholder="Nome ou identificador"></label>
   <div id="conversations" class="conversations" role="list"></div>
@@ -34,6 +64,7 @@
  <section class="chat">
   <header class="chat-head"><div id="contactPhoto" class="avatar">◉</div>
    <div><strong id="contactTitle">Selecione uma conversa</strong><div id="contactJid" class="small"></div></div>
+   <button id="aiContact" hidden type="button">Autorizar IA</button>
    <button id="openContactFolder" hidden>Arquivos do contato</button><button id="refreshPhoto" hidden>Atualizar foto</button>
   </header>
   <div id="messages" class="messages" role="log" aria-live="polite">
