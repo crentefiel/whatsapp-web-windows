@@ -162,10 +162,23 @@ class LearningMemory{
   this.changed('learning');return Number(result.lastInsertRowid);
  }
  suggestion(jid){return this.db.prepare("SELECT * FROM learning_suggestions WHERE jid=? AND status='pending' ORDER BY id DESC LIMIT 1").get(this.jid(jid))||null;}
+ beginSuggestion(id,jid){
+  jid=this.jid(jid);
+  if(!Number.isInteger(id)||id<1)throw Error('Sugestão inválida');
+  const result=this.db.prepare("UPDATE learning_suggestions SET status='sending' WHERE id=? AND jid=? AND status='pending'").run(id,jid);
+  if(!result.changes)throw Error('Sugestão já utilizada ou cancelada');
+  return true;
+ }
+ cancelSuggestionSend(id,jid){
+  jid=this.jid(jid);
+  const target=this.humanHold(jid)?'stale':'pending';
+  this.db.prepare("UPDATE learning_suggestions SET status=? WHERE id=? AND jid=? AND status='sending'").run(target,id,jid);
+  this.changed('learning');
+ }
  finishSuggestion(id,jid,answer,status){
   jid=this.jid(jid);
   if(!Number.isInteger(id)||id<1||!['approved','rejected'].includes(status))throw Error('Sugestão inválida');
-  const s=this.db.prepare("SELECT * FROM learning_suggestions WHERE id=? AND jid=? AND status='pending'").get(id,jid);
+  const s=this.db.prepare("SELECT * FROM learning_suggestions WHERE id=? AND jid=? AND status IN('pending','sending')").get(id,jid);
   if(!s)throw Error('Sugestão não disponível, talvez tenha sido substituída');
   if(status==='approved'&&(!answer||answer.length>LIMIT_REPLY))throw Error('Resposta inválida');
   this.db.prepare("UPDATE learning_suggestions SET status=?,answer=? WHERE id=?").run(status,status==='approved'?answer:s.answer,id);
