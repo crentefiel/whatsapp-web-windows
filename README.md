@@ -1,6 +1,6 @@
 # WhatsApp Desktop para Windows — Gráfica do Sorriso
 
-## Fase Baileys + IA opcional — versão 0.3.2 (em desenvolvimento)
+## Fase Baileys + IA opcional — versão 0.3.3 (em desenvolvimento)
 
 Aplicativo desktop independente em Electron, com **conexão WhatsApp pelo Baileys**, sem carregar o WhatsApp Web dentro de um navegador embutido. **Possui IA opcional configurável via API compatível com OpenAI, desativada por padrão**. A implementação anterior permanece no histórico Git.
 
@@ -95,3 +95,11 @@ O acionamento respeita apenas eventos `notify` do Baileys; se o WhatsApp entrega
 No modo **Somente contatos autorizados**, o botão **IA autorizada** em cada conversa permite retirar a autorização. No modo **Todos os contatos individuais**, não é preciso autorizar cada número. A IA responde apenas textos novos recebidos pelo Baileys no evento `notify`; **nunca deve responder importação de histórico**. Por padrão as respostas têm prefixo `🤖` para identificar o assistente. As mensagens de contexto (até 12 recentes, em texto) são enviadas ao serviço escolhido. Serviços externos podem cobrar pelo uso e processar esses dados em seus servidores. O sistema faz no máximo 20 respostas por hora por contato, espera pelo menos 8 segundos entre respostas e reúne mensagens recebidas próximas.
 
 O suporte à IA é **experimental** e requer validação real do Windows/WhatsApp; os testes de API e de mensagens são simulados. Nesta fase, a IA não interpreta áudio, imagens nem documentos para responder: o envio e recebimento desses arquivos continua sob controle manual. O Baileys é uma biblioteca não oficial e não há garantia de disponibilidade ininterrupta.
+
+### Correção 0.3.3 — mensagens recebidas, mas sem resposta automática
+
+O diagnóstico podia exibir **"Último bloqueio: Mensagem antiga; sem resposta automática"** mesmo quando o aplicativo recebia mensagens novas: uma regra de cinco minutos comparava o horário da mensagem do WhatsApp com o relógio do Windows e rejeitava inclusive mensagens datadas no futuro. O vídeo do teste real mostrou divergência entre horários e esse bloqueio.
+
+Agora o aplicativo confia no evento `notify` para identificar uma mensagem nova, não descarta mensagens por diferença de minutos entre os relógios e rejeita somente eventos com mais de **24 horas no passado**. O histórico sincronizado via `append` ou `messaging-history.set` continua sem acionar respostas, e os IDs de mensagens continuam protegidos contra duplicidade.
+
+**Teste real:** instale a versão 0.3.3 preservando a pasta `userData`; confira se o WhatsApp está conectado e a IA está realmente ativada. Peça a outro contato para enviar uma mensagem NOVA e confira em Configurações → Inteligência artificial se `Entradas avaliadas`, `Agendadas`, `Chamadas à API` e `Respostas enviadas` aumentam. Testar a API isoladamente com `OK` não comprova o envio automático pelo WhatsApp. Se o relógio do Windows estiver incorreto, sincronize a data e hora do sistema também.
