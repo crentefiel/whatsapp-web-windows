@@ -1,7 +1,7 @@
 name: Gerar e verificar instalador Windows
 on:
   push:
-    branches: [main, 'feat/baileys-client-foundation']
+    branches: [main, 'feat/baileys-client-foundation', 'feat/observation-learning-memory']
     paths:
       - 'src/**'
       - 'test/**'
