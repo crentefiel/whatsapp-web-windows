@@ -174,3 +174,40 @@ test('diagnóstico mostra por que novas mensagens não disparam: desativada, aut
   responder.stop();
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('modo todos os contatos individuais ativa sem lista prévia, persiste e mantém grupos excluídos',()=>withSettings((settings,dir)=>{
+ const config=settings.update({baseUrl:'http://127.0.0.1:31415/v1',model:'auto',responseScope:'all',enabled:true});
+ assert.equal(config.enabled,true);
+ assert.equal(config.responseScope,'all');
+ assert.equal(config.allowedJids.length,0);
+ const restarted=new AiSettings(dir,fakeVault);
+ assert.equal(restarted.public().responseScope,'all');
+ assert.equal(restarted.public().enabled,true);
+ const responder=new AutoResponder({
+  settings:restarted,client:{status:{state:'conectado'}},
+  store:{resolveJid:jid=>jid,messages:()=>[]}
+ });
+ assert.equal(responder.allowed(JID),true);
+ assert.equal(responder.allowed(SECOND),true);
+ assert.equal(responder.allowed('987654321@lid'),true);
+ assert.equal(responder.allowed('120363000@g.us'),false);
+ assert.equal(responder.allowed('status@broadcast'),false);
+ assert.equal(responder.allowed('100@newsletter'),false);
+ responder.stop();
+}));
+
+test('modo restrito preserva exigência de contato e a configuração anterior se o salvamento falhar',()=>withSettings(settings=>{
+ settings.update({baseUrl:'http://localhost:11434/v1',model:'auto',responseScope:'all',enabled:true});
+ assert.throws(()=>settings.update({responseScope:'selected',enabled:true}),/Autorize um contato/);
+ assert.equal(settings.public().enabled,true);
+ assert.equal(settings.public().responseScope,'all');
+ settings.update({responseScope:'selected',allowedJids:[JID],enabled:true});
+ assert.equal(settings.public().responseScope,'selected');
+ assert.equal(settings.public().enabled,true);
+}));
+
+test('modo todos não é ativado automaticamente apenas por configurar a API',()=>withSettings(settings=>{
+ const result=settings.update({baseUrl:'http://127.0.0.1:31415/v1',model:'auto',responseScope:'all'});
+ assert.equal(result.enabled,false);
+ assert.equal(result.responseScope,'all');
+}));
