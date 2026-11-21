@@ -211,3 +211,27 @@ test('modo todos não é ativado automaticamente apenas por configurar a API',()
  assert.equal(result.enabled,false);
  assert.equal(result.responseScope,'all');
 }));
+
+test('modo todos responde mensagem nova de contato privado sem autorização individual, mas não responde grupo',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sorriso-ai-todos-'));
+ try{
+  const settings=new AiSettings(dir,fakeVault);
+  settings.update({baseUrl:'http://127.0.0.1:31415/v1',model:'auto',responseScope:'all',enabled:true});
+  const sends=[],requests=[];
+  const ai=new AutoResponder({
+   settings,
+   client:{status:{state:'conectado'},sendText:async(jid,body)=>{sends.push({jid,body});}},
+   store:{resolveJid:jid=>jid,messages:()=>[{kind:'text',body:'Oi!',from_me:0}]},
+   delayMs:1,fetchImpl:async(url,init)=>{
+    requests.push(JSON.parse(init.body));
+    return{ok:true,text:async()=>JSON.stringify({choices:[{message:{content:'Olá, tudo bem?'}}]})};
+   }
+  });
+  ai.handleIncoming({...incoming(SECOND),id:'nova-2',timestamp:Date.now()},'tempo_real');
+  ai.handleIncoming({...incoming('12036312345@g.us'),id:'grupo',timestamp:Date.now()},'tempo_real');
+  await new Promise(resolve=>setTimeout(resolve,60));
+  assert.equal(requests.length,1);
+  assert.deepEqual(sends,[{jid:SECOND,body:'🤖 Olá, tudo bem?'}]);
+  ai.stop();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
