@@ -29,6 +29,7 @@ test('campo de texto aceita digitação offline e envio/anexos liberam após con
     messages:async()=>[],
     sendText:async(jid,message)=>{sent.push({jid,message});},
     sendFile:async(jid,kind)=>{files.push({jid,kind});},
+    openContactFolder:async jid=>{opened.push(jid);},
     onChange:callback=>{onChange=callback;}
   }};
   const code=fs.readFileSync(path.join(__dirname,'../src/ui.js'),'utf8');
