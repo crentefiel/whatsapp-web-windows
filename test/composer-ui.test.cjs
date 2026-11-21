@@ -56,4 +56,6 @@ test('campo de texto aceita digitação offline e envio/anexos liberam após con
   await get('sendFile').handlers.click();
   assert.equal(files.length,1);
   assert.equal(files[0].jid,'5511999999999@s.whatsapp.net');
+  await get('openContactFolder').handlers.click();
+  assert.deepEqual(opened,['5511999999999@s.whatsapp.net']);
 });
