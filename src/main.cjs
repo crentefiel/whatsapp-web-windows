@@ -1,5 +1,5 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,dialog,protocol,net,shell,Menu}=require('electron');
+const {app,BrowserWindow,ipcMain,dialog,protocol,net,shell,Menu,clipboard}=require('electron');
 const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('node:url');
 const {Store}=require('./core/database.cjs');
 const {WhatsAppClient}=require('./core/wa-client.cjs');
@@ -38,6 +38,12 @@ async function startApp(){
    return net.fetch(pathToFileURL(path.join(__dirname,allowed[url.pathname])).toString());
  });
  api('whatsapp:status',()=>({...client.status}));
+ api('whatsapp:copyDiagnostics',()=>{
+   // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
+   const {qr,...diagnostics}=client.status;
+   clipboard.writeText(JSON.stringify({appVersion:app.getVersion(),...diagnostics},null,2));
+   return{copied:true};
+ });
  api('whatsapp:start',()=>client.start());
  api('whatsapp:repair',async()=>{
    if(client.status.state==='conectado')throw Error('O WhatsApp já está conectado.');
