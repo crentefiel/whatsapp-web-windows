@@ -1,6 +1,6 @@
 # WhatsApp Desktop para Windows — Gráfica do Sorriso
 
-## Fase Baileys + IA opcional — versão 0.3.0 (em desenvolvimento)
+## Fase Baileys + IA opcional — versão 0.3.1 (em desenvolvimento)
 
 Aplicativo desktop independente em Electron, com **conexão WhatsApp pelo Baileys**, sem carregar o WhatsApp Web dentro de um navegador embutido. **Possui IA opcional configurável via API compatível com OpenAI, desativada por padrão**. A implementação anterior permanece no histórico Git.
 
@@ -86,6 +86,10 @@ A validação com WhatsApp real no Windows ainda é necessária para cada versã
 5. Abra uma conversa individual e clique **Autorizar IA**. A autorização é individual. Sem autorização, não há resposta automática.
 6. Volte às configurações, marque **Ativar respostas automáticas** e clique **Salvar configurações da IA**. Use primeiro um contato de teste. Para parar imediatamente, desmarque e salve.
 7. Para excluir o segredo armazenado, clique **Apagar chave salva**. A IA será desligada.
+
+**Se a IA não responder:** primeiro salve a URL, o modelo e a chave. Clique em **Testar conexão com a IA**, dentro da engrenagem; esse teste envia apenas uma frase sintética à API, **não** envia nada no WhatsApp nem usa conversas reais. O resultado informa se o provedor respondeu ou se houve erro de autenticação (401/403), URL/modelo (404), limites (429), rede ou incompatibilidade. Depois, confirme que a opção de respostas está **ativa** e que o contato da conversa aparece como **IA autorizada**. Envie uma mensagem NOVA a partir do outro telefone para fazer o teste (não vale apenas reler o histórico). Os contadores "Entradas avaliadas", "Chamadas à API" e "Respostas enviadas" ajudam a localizar a falha. Em **WhatsApp → Copiar diagnóstico**, o objeto `ai` pode ser compartilhado sem chave, conteúdo de conversas ou dados de contatos.
+
+O acionamento respeita apenas eventos `notify` do Baileys; se o WhatsApp entregar um `append` e depois um `notify` com o mesmo ID, a IA responde uma vez ao `notify` recente, mesmo que a mensagem já tenha sido armazenada, mas não responde a eventos de histórico. A IA não responde mensagens anteriores a cinco minutos nem mensagens próprias.
 
 O botão **IA autorizada** em cada conversa permite retirar a autorização. A IA responde apenas textos novos recebidos pelo Baileys no evento `notify`; **nunca deve responder importação de histórico**. Por padrão as respostas têm prefixo `🤖` para identificar o assistente. As mensagens de contexto (até 12 recentes, em texto) são enviadas ao serviço escolhido. Serviços externos podem cobrar pelo uso e processar esses dados em seus servidores. O sistema faz no máximo 20 respostas por hora por contato, espera pelo menos 8 segundos entre respostas e reúne mensagens recebidas próximas.
 
