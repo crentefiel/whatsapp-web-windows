@@ -4,7 +4,6 @@ const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:pa
 const {WhatsAppClient}=require('../src/core/wa-client.cjs');
 const {saveIncomingBuffer}=require('../src/core/media-storage.cjs');
 const {resolveStoredMedia}=require('../src/core/media-files.cjs');
-const {Store}=require('../src/core/database.cjs');
 
 test('anexos recebidos são escritos binariamente em pastas separadas por contato e categoria',async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sorriso-anexos-'));
@@ -83,5 +82,26 @@ test('envio de PPTX, XLSX, DOCX, ZIP, PDF e extensão desconhecida usa documento
   await client.sendAttachment(jid,corel,'document');
   assert.equal(sent.at(-1).payload.fileName,'grafica.cdr');
   assert.equal(sent.length,cases.length+1);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+test('envio de áudio, foto e vídeo usa cada tipo próprio sem executar arquivo',async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sorriso-multimidia-'));
+ try{
+  const sent=[],jid='5511999990001@s.whatsapp.net';
+  const client=new WhatsAppClient({dataDir:dir,store:{},changed:()=>{}});
+  client.status.state='conectado';
+  client.socket={sendMessage:async(dest,payload)=>{
+    sent.push(payload);return{key:{id:'TEST',remoteJid:dest,fromMe:true},message:{conversation:'ok'}};
+  }};
+  client.ingest=async()=>{};
+  for(const [file,kind] of [['foto.png','image'],['voz.mp3','audio'],['video.mp4','video']]){
+    const filePath=path.join(dir,file);
+    await fs.writeFile(filePath,Buffer.from('dados simulados'));
+    await client.sendAttachment(jid,filePath,kind);
+    assert.equal(sent.at(-1)[kind].url,filePath);
+  }
+  assert.equal(sent[1].mimetype,'audio/mpeg');
+  assert.equal(sent.length,3);
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
