@@ -92,73 +92,115 @@ class AutoResponder{
   this.settings=settings;this.client=client;this.store=store;this.fetch=fetchImpl;
   this.delayMs=delayMs;this.pending=new Map();this.running=new Set();
   this.lastSent=new Map();this.hourly=new Map();this.active=true;
-  this.stats={sent:0,failed:0,skipped:0};
+  this.stats={sent:0,failed:0,skipped:0,observed:0,scheduled:0,apiCalls:0,lastTrigger:null,lastError:'',lastSkip:''};
  }
  allowed(jid){
   const config=this.settings.public();
   const target=this.store.resolveJid?.(jid)||jid;
   return config.enabled&&config.allowedJids.some(allowed=>(this.store.resolveJid?.(allowed)||allowed)===target);
  }
+ skip(reason){this.stats.skipped++;this.stats.lastSkip=reason;}
  handleIncoming(m,source){
-  if(!this.active||source!=='tempo_real'||m.fromMe||m.type!=='text'||!m.text?.trim()||
-    !isAllowedJid(m.jid)||!this.allowed(m.jid))return;
+  this.stats.observed++;this.stats.lastTrigger=new Date().toISOString();
+  if(!this.active){this.skip('IA encerrada');return;}
+  if(source!=='tempo_real'){this.skip('Não é mensagem nova');return;}
+  if(m.fromMe||m.type!=='text'||!m.text?.trim()||!isAllowedJid(m.jid)){
+   this.skip('Mensagem não elegível');return;
+  }
+  if(!this.settings.public().enabled){this.skip('IA desativada');return;}
+  if(!this.allowed(m.jid)){this.skip('Contato sem autorização');return;}
   const jid=this.store.resolveJid?.(m.jid)||m.jid;
-  // Mensagens que chegam em sequência são agrupadas em uma única resposta.
+  // Agrupa mensagens próximas e evita respostas para cada fragmento.
   if(this.pending.has(jid))clearTimeout(this.pending.get(jid));
   const t=setTimeout(()=>{
    this.pending.delete(jid);
-   void this.reply(jid).catch(()=>{this.stats.failed++;});
+   void this.reply(jid).catch(e=>{
+    this.stats.failed++;this.stats.lastError=this.safeError(e);
+   });
   },this.delayMs);
-  this.pending.set(jid,t);
+  this.pending.set(jid,t);this.stats.scheduled++;
+  this.stats.lastSkip='';
+ }
+ safeError(error){
+  const message=String(error?.message||error);
+  // Nunca registrar cabeçalhos, prompts, chaves, URLs ou conteúdo do provedor.
+  if(/HTTP 401|HTTP 403/.test(message))return 'A API recusou a autenticação (HTTP 401/403). Verifique chave e permissões.';
+  if(/HTTP 404/.test(message))return 'A API retornou HTTP 404. Confirme a URL base e o nome do modelo.';
+  if(/HTTP 429/.test(message))return 'A API retornou HTTP 429. Verifique limite, créditos ou taxa de uso.';
+  if(/HTTP 5\d\d/.test(message))return 'O provedor de IA retornou erro no servidor.';
+  if(/HTTP 400/.test(message))return 'A API retornou HTTP 400. Confira modelo e compatibilidade Chat Completions.';
+  if(/tempo limite|abort|timeout/i.test(message))return 'A API demorou mais que o limite de espera.';
+  if(/fetch failed|ENOTFOUND|ECONNREFUSED|network|certificate|TLS/i.test(message))return 'Falha na conexão com a API. Confira URL, rede e certificado.';
+  if(/chave|criptografia|proteção/.test(message))return 'Não foi possível usar a chave de API protegida neste Windows.';
+  if(/resposta de texto|JSON inválido|conteúdo excessivo/.test(message))return 'O provedor retornou resposta incompatível com Chat Completions.';
+  if(/WhatsApp não conectado/.test(message))return 'WhatsApp estava desconectado na hora de enviar.';
+  return 'Erro ao consultar a IA ou enviar resposta. Verifique a configuração e teste a API.';
+ }
+ async chatRequest(config,messages){
+  if(!config.model?.trim())throw Error('Defina o modelo antes de testar a IA');
+  const key=this.settings.getKey();
+  const url=new URL(config.baseUrl);
+  if(!isLocalUrl(url)&&!key)throw Error('A chave de API é obrigatória em serviços externos');
+  const endpoint=config.baseUrl.replace(/\/$/,'')+'/chat/completions';
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),45000);
+  this.stats.apiCalls++;
+  try{
+   const response=await this.fetch(endpoint,{
+    method:'POST',signal:ctrl.signal,
+    headers:{'Content-Type':'application/json',...(key?{Authorization:'Bearer '+key}:{})},
+    body:JSON.stringify({model:config.model,stream:false,messages})
+   });
+   if(!response.ok)throw Error('HTTP '+response.status);
+   const raw=await response.text();
+   if(raw.length>65536)throw Error('conteúdo excessivo');
+   let data;try{data=JSON.parse(raw);}catch{throw Error('JSON inválido');}
+   const content=data?.choices?.[0]?.message?.content;
+   const answer=typeof content==='string'?content:
+     Array.isArray(content)?content.filter(p=>p?.type==='text'&&typeof p?.text==='string').map(p=>p.text).join('\n'):'';
+   if(!answer.trim())throw Error('resposta de texto ausente');
+   return answer.trim().slice(0,1400);
+  }finally{clearTimeout(timer);}
+ }
+ async testConnection(){
+  try{
+   const reply=await this.chatRequest(this.settings.public(),[
+    {role:'system',content:'Responda brevemente em português.'},
+    {role:'user',content:'Teste técnico de conexão. Responda apenas OK.'}
+   ]);
+   this.stats.lastError='';
+   return{success:true,preview:reply.slice(0,200)};
+  }catch(e){
+   const reason=this.safeError(e);this.stats.lastError=reason;
+   return{success:false,error:reason};
+  }
  }
  async generate(jid,config){
   const history=this.store.messages(jid,12).filter(m=>m.kind==='text'&&m.body).map(m=>({
    role:m.from_me?'assistant':'user',content:String(m.body).slice(0,1800)
   }));
   if(!history.some(m=>m.role==='user'))return '';
-  const body={model:config.model,stream:false,messages:[
-    {role:'system',content:config.systemPrompt},
-    ...history
-  ]};
-  const endpoint=config.baseUrl.replace(/\/$/,'')+'/chat/completions';
-  const apiKey=this.settings.getKey();
-  const ctrl=new AbortController();
-  const timer=setTimeout(()=>ctrl.abort(),20000);
-  try{
-   const response=await this.fetch(endpoint,{
-    method:'POST',signal:ctrl.signal,headers:{
-     'Content-Type':'application/json',...(apiKey?{Authorization:'Bearer '+apiKey}:{})
-    },body:JSON.stringify(body)
-   });
-   if(!response.ok)throw Error('A API de IA retornou HTTP '+response.status);
-   const raw=await response.text();
-   if(raw.length>65536)throw Error('A API de IA retornou conteúdo excessivo');
-   let data;try{data=JSON.parse(raw);}catch{throw Error('A API retornou JSON inválido');}
-   const answer=data?.choices?.[0]?.message?.content;
-   if(typeof answer!=='string'||!answer.trim())throw Error('A API não retornou uma resposta de texto');
-   return answer.trim().slice(0,1400);
-  }finally{clearTimeout(timer);}
+  return this.chatRequest(config,[{role:'system',content:config.systemPrompt},...history]);
  }
  async reply(jid){
   if(!this.active||this.running.has(jid)||!this.allowed(jid))return;
-  if(this.client.status?.state!=='conectado')return;
+  if(this.client.status?.state!=='conectado'){this.skip('WhatsApp desconectado');return;}
   const now=Date.now();
-  if(now-(this.lastSent.get(jid)||0)<8000){this.stats.skipped++;return;}
+  if(now-(this.lastSent.get(jid)||0)<8000){this.skip('Intervalo mínimo entre respostas');return;}
   const recent=this.hourly.get(jid)||[];
   const valid=recent.filter(t=>now-t<3600000);
-  if(valid.length>=20){this.stats.skipped++;return;}
+  if(valid.length>=20){this.skip('Limite de 20 respostas por hora');return;}
   this.running.add(jid);
   try{
    const config=this.settings.public();
    const answer=await this.generate(jid,config);
-   if(!answer||!this.active||!this.allowed(jid)||this.client.status?.state!=='conectado')return;
+   if(!answer){this.skip('Sem texto para responder');return;}
+   if(!this.active||!this.allowed(jid)||this.client.status?.state!=='conectado')return;
    await this.client.sendText(jid,'🤖 '+answer);
    this.lastSent.set(jid,Date.now());this.hourly.set(jid,[...valid,Date.now()]);
-   this.stats.sent++;
+   this.stats.sent++;this.stats.lastError='';this.stats.lastSkip='';
   }catch(e){
-   this.stats.failed++;
-   // Não armazenar conteúdo privado nem a chave da API nos diagnósticos.
-   this.stats.lastError=String(e.message||'Falha na resposta').replace(/Bearer\s+\S+/gi,'Bearer [oculto]').slice(0,180);
+   this.stats.failed++;this.stats.lastError=this.safeError(e);
   }finally{this.running.delete(jid);}
  }
  stop(){
