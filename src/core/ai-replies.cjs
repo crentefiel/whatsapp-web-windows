@@ -97,9 +97,9 @@ class AiSettings{
 }
 function pricesIn(text){
  const values=[];
- const regex=/(?:R\\$\\s*(\\d+(?:\\.\\d{3})*(?:,\\d{1,2})?)|(\\d+(?:,\\d{1,2})?)\\s*reais?\\b)/gi;
+ const regex=/(?:R\$\s*(\d+(?:\.\d{3})*(?:,\d{1,2})?)|(\d+(?:,\d{1,2})?)\s*reais?\b)/gi;
  for(const match of String(text||'').matchAll(regex)){
-  const value=(match[1]||match[2]).replace(/\\./g,'').replace(',','.');
+  const value=(match[1]||match[2]).replace(/\./g,'').replace(',','.');
   const cents=Math.round(Number(value)*100);
   if(Number.isFinite(cents)&&cents>=0)values.push(cents);
  }
