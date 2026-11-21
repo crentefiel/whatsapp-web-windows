@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 let selected=null,chats=[],reloading=false,pendingStatus=false,pendingConversations=false;
 let currentState='desconectado',sendingText=false,sendingFile=false;
-let aiConfig={enabled:false,allowedJids:[],hasKey:false};
+let aiConfig={enabled:false,allowedJids:[],hasKey:false,responseScope:'selected'};
 function refreshComposer(){
  const hasContact=Boolean(selected),connected=currentState==='conectado';
  $('messageInput').disabled=!hasContact;
@@ -13,11 +13,19 @@ function refreshComposer(){
 }
 function refreshAiContact(){
  const btn=$('aiContact');
- btn.hidden=!selected;
+ btn.hidden=!selected||aiConfig.responseScope==='all';
  const approved=!!selected&&aiConfig.allowedJids.includes(selected);
  btn.textContent=approved?'IA autorizada':'Autorizar IA';
  btn.className=approved?'approved':'';
  btn.title=approved?'Clique para impedir a IA de responder este contato':'Clique para permitir respostas automáticas a este contato';
+}
+function refreshAiScope(){
+ const all=$('aiScope').value==='all';
+ $('aiAllowedCount').textContent=all?'Modo escolhido: todos os contatos individuais (sem grupos e canais)':
+   'Contatos autorizados: '+(aiConfig.allowedJids?.length||0);
+ $('aiScopeHelp').textContent=all?
+  'Ao salvar e ativar, mensagens novas de qualquer contato individual poderão receber resposta. O provedor poderá processar mensagens recentes da conversa. Não inclui grupos, canais, comunidades nem status.':
+  'Abra a conversa de um contato e clique em “Autorizar IA”. Somente contatos autorizados receberão respostas automáticas.';
 }
 async function loadAi(){
  try{
@@ -26,7 +34,8 @@ async function loadAi(){
   $('aiModel').value=aiConfig.model||'';
   $('aiPrompt').value=aiConfig.systemPrompt||'';
   $('aiEnabled').checked=Boolean(aiConfig.enabled);
-  $('aiAllowedCount').textContent='Contatos autorizados: '+aiConfig.allowedJids.length;
+  $('aiScope').value=aiConfig.responseScope||'selected';
+  refreshAiScope();
   const stats=await window.whatsapp.aiDiagnostics();
   $('aiHealth').textContent='Entradas avaliadas: '+(stats.observed||0)+' · Agendadas: '+(stats.scheduled||0)+' · Chamadas à API: '+(stats.apiCalls||0)+' · Respostas enviadas: '+(stats.sent||0)+' · Falhas: '+(stats.failed||0)+' · Ignoradas: '+(stats.skipped||0)+(stats.lastError?' · Último erro: '+stats.lastError:'')+(stats.lastSkip?' · Último bloqueio: '+stats.lastSkip:'');
   $('aiKeyStatus').textContent=aiConfig.hasKey?'Chave de API protegida e salva. Deixe o campo em branco para mantê-la.':'Nenhuma chave salva (API local pode funcionar sem chave).';
@@ -133,19 +142,34 @@ $('copyDiagnostics').addEventListener('click',async()=>{
  try{const result=await window.whatsapp.copyDiagnostics();if(result?.copied)error('Diagnóstico copiado. Cole no chat para análise.');}
  catch(e){error(e.message);}
 });
+$('aiScope').addEventListener('change',refreshAiScope);
 $('aiForm').addEventListener('submit',async event=>{
- event.preventDefault();$('aiResult').textContent='Salvando...';
+ event.preventDefault();
+ const saveButton=$('aiSave');
+ if(saveButton.disabled)return;
+ saveButton.disabled=true;
+ $('aiResult').textContent='Salvando configurações...';
  const config={
   baseUrl:$('aiBaseUrl').value.trim(),model:$('aiModel').value.trim(),
   systemPrompt:$('aiPrompt').value,enabled:Boolean($('aiEnabled').checked),
-  apiKey:$('aiApiKey').value
+  responseScope:$('aiScope').value,apiKey:$('aiApiKey').value
  };
  try{
-  aiConfig=await window.whatsapp.aiSave(config);
+  const result=await window.whatsapp.aiSave(config);
+  aiConfig=result;
   $('aiApiKey').value='';
-  $('aiResult').textContent=aiConfig.enabled?'IA ativada somente nos contatos autorizados.':'Configurações salvas. IA desativada.';
-  await loadAi();
- }catch(e){$('aiResult').textContent=e.message;}
+  $('aiEnabled').checked=Boolean(result.enabled);
+  $('aiScope').value=result.responseScope||'selected';
+  $('aiResult').textContent=result.enabled?
+   (result.responseScope==='all'?'Configurações salvas! IA ativada para todos os contatos individuais.':
+   'Configurações salvas! IA ativada para os contatos autorizados.'):
+   'Configurações salvas! Respostas automáticas desativadas.';
+  refreshAiScope();
+  refreshAiContact();
+ }catch(e){
+  // Preserve os valores digitados e a seleção, permitindo corrigir sem recomeçar.
+  $('aiResult').textContent='Não foi possível salvar: '+e.message;
+ }finally{saveButton.disabled=false;}
 });
 $('aiTest').addEventListener('click',async()=>{
  const button=$('aiTest');
@@ -156,7 +180,6 @@ $('aiTest').addEventListener('click',async()=>{
   $('aiTestResult').textContent=result.success?
    'API funcionando. Resposta de teste: '+result.preview:
    'Falha na API: '+result.error;
-  await loadAi();
  }catch(e){$('aiTestResult').textContent='Falha no teste: '+e.message;}
  finally{button.disabled=false;}
 });
@@ -174,7 +197,7 @@ $('aiContact').addEventListener('click',async()=>{
  try{
   aiConfig=await window.whatsapp.aiContact(selected,!approved);
   refreshAiContact();
-  $('aiAllowedCount').textContent='Contatos autorizados: '+aiConfig.allowedJids.length;
+  refreshAiScope();
   $('aiResult').textContent=approved?'Contato retirado da IA.':'Contato autorizado. Para responder, ative a IA nas Configurações.';
  }catch(e){error(e.message);}
 });
@@ -197,7 +220,7 @@ $('sendFile').addEventListener('click',async()=>{
  catch(e){error(e.message);}finally{sendingFile=false;await status();}
 });
 window.whatsapp.onChange(kind=>{
- if(kind==='ai'){void loadAi();return;}
+ if(kind==='ai'){return;} // Não sobrescrever campos ainda não salvos enquanto o usuário edita.
  reload(kind).catch(e=>error(e.message));
 });
 refreshComposer();
