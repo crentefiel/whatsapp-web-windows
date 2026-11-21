@@ -5,8 +5,8 @@ const {AiSettings,AutoResponder,validBaseUrl}=require('../src/core/ai-replies.cj
 const JID='5511999999999@s.whatsapp.net',SECOND='5511888888888@s.whatsapp.net';
 const fakeVault={
  isEncryptionAvailable:()=>true,
- encryptString:s=>Buffer.from('criptografado:'+s,'utf8'),
- decryptString:b=>b.toString('utf8').slice('criptografado:'.length)
+ encryptString:s=>Buffer.from([...Buffer.from(s,'utf8')].map(x=>x^0xa5)),
+ decryptString:b=>Buffer.from([...b].map(x=>x^0xa5)).toString('utf8')
 };
 function withSettings(fn){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sorriso-ai-'));
