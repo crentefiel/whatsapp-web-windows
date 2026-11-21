@@ -2,11 +2,12 @@
 const fs=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto');
 const {normalizeMessage,isAllowedJid,MEDIA_LIMIT}=require('./messages.cjs');
 const {saveIncomingBuffer}=require('./media-storage.cjs');
+const {relativeMediaPath}=require('./media-files.cjs');
 const {archiveBaileysSession}=require('./session.cjs');
 class WhatsAppClient{
   constructor({dataDir,store,changed}){
-    this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;this.sessionExpired=false;
-    this.status={state:'desconectado',qr:null,lastEvent:null,lastSaved:null,received:0,errors:0,detail:''};this.logger=null;
+    this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;this.sessionExpired=false;this.recentMessages=new Map();
+    this.status={state:'desconectado',qr:null,lastEvent:null,lastSaved:null,lastIncoming:null,received:0,saved:0,upserts:0,ignored:0,duplicates:0,errors:0,mediaErrors:0,detail:''};this.logger=null;
   }
   update(patch){Object.assign(this.status,patch);this.changed('status');}
   async start(){
@@ -19,7 +20,7 @@ class WhatsAppClient{
       const {state,saveCreds}=await b.useMultiFileAuthState(path.join(this.dataDir,'baileys_auth'));
       if(this.closed){this.starting=false;return;}
       const sock=b.default({auth:state,logger:this.logger,printQRInTerminal:false,syncFullHistory:true,
-        markOnlineOnConnect:false,shouldSyncHistoryMessage:()=>true,browser:b.Browsers?.windows?.('Chrome')||['Windows','Chrome','1.0']});
+        markOnlineOnConnect:false,shouldSyncHistoryMessage:()=>true,getMessage:async key=>this.getMessage(key),browser:b.Browsers?.windows?.('Chrome')||['Windows','Chrome','1.0']});
       this.socket=sock;sock.ev.on('creds.update',saveCreds);
       sock.ev.on('connection.update',async({connection,qr,lastDisconnect})=>{
         if(this.socket!==sock)return;
@@ -42,15 +43,27 @@ class WhatsAppClient{
           if(!loggedOut&&!this.closed)this.scheduleRetry();
         }
       });
-      sock.ev.on('messages.upsert',({messages})=>this.ingest(messages,'tempo_real',sock));
+      sock.ev.on('messages.upsert',({messages=[],type})=>{
+        this.status.upserts++;this.update({lastEvent:new Date().toISOString()});
+        void this.ingest(messages,type==='append'?'sincronizacao':'tempo_real',sock)
+          .catch(e=>this.reportError('evento_recebimento',e));
+      });
       sock.ev.on('messaging-history.set',({contacts=[],chats=[],messages=[]})=>{
         try{
           for(const c of contacts)if(isAllowedJid(c.id))this.store.contact(c.id,c.name||c.notify||'');
           for(const c of chats)if(isAllowedJid(c.id))this.store.contact(c.id,c.name||'',Number(c.conversationTimestamp||0)*1000);
           this.changed('conversas');
         }catch(e){this.reportError('historico_contatos',e);}
-        this.ingest(messages,'historico',sock);
+        void this.ingest(messages,'historico',sock).catch(e=>this.reportError('historico_mensagens',e));
       });
+      for(const event of ['chats.upsert','chats.update']){
+        sock.ev.on(event,(chats)=>{
+          try{
+            for(const c of chats||[])if(isAllowedJid(c.id))this.store.contact(c.id,c.name||'',Number(c.conversationTimestamp||0)*1000);
+            this.changed('conversas');
+          }catch(e){this.reportError('lista_conversas',e);}
+        });
+      }
       sock.ev.on('contacts.upsert',(contacts)=>this.onContacts(contacts));
       sock.ev.on('contacts.update',(contacts)=>this.onContacts(contacts));
     }catch(e){this.socket=null;this.reportError('inicio',e);this.update({state:'erro',qr:null});this.scheduleRetry();}
@@ -60,36 +73,79 @@ class WhatsAppClient{
   onContacts(contacts){try{for(const c of contacts||[])if(isAllowedJid(c.id))this.store.contact(c.id,c.name||c.notify||c.verifiedName||'');this.changed('conversas');}
     catch(e){this.reportError('contatos',e);}}
   reportError(where,e){this.status.errors++;this.update({detail:'Erro em '+where+': '+String(e.message||e).slice(0,180)});}
+  remember(raw){
+    const key=raw?.key;
+    if(!key?.id||!raw.message)return;
+    for(const jid of [key.remoteJid,key.remoteJidAlt]){
+      if(!isAllowedJid(jid))continue;
+      const cacheKey=jid+'|'+key.id;
+      this.recentMessages.delete(cacheKey);
+      this.recentMessages.set(cacheKey,raw.message);
+      while(this.recentMessages.size>500)this.recentMessages.delete(this.recentMessages.keys().next().value);
+    }
+  }
+  getMessage(key){
+    const jid=key?.remoteJid,id=key?.id;
+    if(!isAllowedJid(jid)||!id)return undefined;
+    return this.recentMessages.get(jid+'|'+id)||this.store.messageContent?.(key);
+  }
   async ingest(messages,source,sock){
+    let anySaved=false,ignored=0,duplicates=0;
+    const pendingMedia=[];
+    // Primeiro gravar TODO o lote de mensagens. Um arquivo lento não pode
+    // bloquear mensagens de texto que chegaram depois no mesmo evento.
     for(const raw of messages||[]){
-      const m=normalizeMessage(raw);if(!m)continue;
-      this.update({lastEvent:new Date().toISOString()});
-      const exists=this.store.has(m);
-      // Se houve falha anterior no anexo, tente novamente quando o evento reaparecer.
-      if(exists&&(!m.media||this.store.linkedMedia(m)))continue;
       try{
-        let mediaId=null;
-        if(m.media&&m.media.size<=MEDIA_LIMIT){
-          try{
-            const b=await import('@whiskeysockets/baileys');
-            const buf=await b.downloadMediaMessage(raw,'buffer',{}, {logger:this.logger,reuploadRequest:sock.updateMediaMessage});
-            if(buf.length<=MEDIA_LIMIT){
-              const id=crypto.randomUUID();
-              const {relativePath,size}=await saveIncomingBuffer(this.dataDir,
-                {jid:m.jid,kind:m.media.kind,id,filename:m.media.filename},buf);
-              this.store.saveMedia({id,filename:m.media.filename,mime:m.media.mime,kind:m.media.kind,relativePath,size});
-              mediaId=id;
+        const m=normalizeMessage(raw);
+        if(!m){ignored++;continue;}
+        if(m.altJid)this.store.linkJids?.(m.jid,m.altJid);
+        if(this.store.resolveJid)m.jid=this.store.resolveJid(m.jid);
+        this.remember(raw);
+        const exists=this.store.has(m);
+        if(!exists){
+          if(this.store.save(m)){
+            this.status.saved++;anySaved=true;
+            if(!m.fromMe){
+              this.status.received++;
+              this.status.lastIncoming=new Date().toISOString();
             }
-          }catch(e){this.reportError('download_midia',e);}
-        }
-        if(exists){
-          if(mediaId&&this.store.linkMedia(m,mediaId)){
-            this.update({lastSaved:new Date().toISOString()});this.changed('conversas');
+            this.status.lastSaved=new Date().toISOString();
           }
-        }else if(this.store.save(m,mediaId)){
-          this.status.received++;this.update({lastSaved:new Date().toISOString()});this.changed('conversas');
+        }else duplicates++;
+        // Atualizar mídias incompletas quando um evento válido reaparece.
+        if(source!=='envio'&&m.media&&m.media.size<=MEDIA_LIMIT&&(!exists||!this.store.linkedMedia(m))){
+          pendingMedia.push({raw,m});
         }
-      }catch(e){this.reportError('persistencia_'+source,e);}
+      }catch(e){this.reportError('gravar_mensagem_'+source,e);}
+    }
+    this.status.ignored+=ignored;this.status.duplicates+=duplicates;
+    if(anySaved)this.changed('conversas');
+    this.changed('status');
+    // Baixar anexos só DEPOIS de persistir todas as mensagens do lote.
+    for(const {raw,m} of pendingMedia){
+      try{
+        const b=await import('@whiskeysockets/baileys');
+        const downloader=this.downloadMedia||((msg,client)=>b.downloadMediaMessage(msg,'buffer',{},{
+          logger:this.logger,reuploadRequest:client?.updateMediaMessage
+        }));
+        const buffer=await downloader(raw,sock);
+        if(!Buffer.isBuffer(buffer))throw Error('Download não retornou bytes');
+        if(buffer.length>MEDIA_LIMIT)throw Error('Mídia excede 100 MB');
+        if(this.store.linkedMedia(m))continue;
+        const id=crypto.randomUUID();
+        const saved=await saveIncomingBuffer(this.dataDir,{
+          jid:m.jid,kind:m.media.kind,id,filename:m.media.filename
+        },buffer);
+        this.store.saveMedia({id,filename:m.media.filename,mime:m.media.mime,
+          kind:m.media.kind,relativePath:saved.relativePath,size:saved.size});
+        if(this.store.linkMedia(m,id)){
+          this.status.lastSaved=new Date().toISOString();
+          this.changed('conversas');
+        }
+      }catch(e){
+        this.status.mediaErrors++;
+        this.reportError('download_midia',e);
+      }
     }
   }
   async sendText(jid,text){
@@ -110,6 +166,23 @@ class WhatsAppClient{
       kind==='video'?{video:data,caption:caption.slice(0,1000)}:{audio:data,mimetype};
     const sent=await this.socket.sendMessage(jid,content);
     await this.ingest([sent],'envio',this.socket);
+    // Anexo já está no computador: preservar cópia local sem redownload.
+    const normalized=normalizeMessage(sent);
+    if(normalized?.media&&normalized.id){
+      try{
+        if(normalized.altJid)this.store.linkJids?.(normalized.jid,normalized.altJid);
+        const resolved=this.store.resolveJid?.(normalized.jid)||normalized.jid;
+        normalized.jid=resolved;
+        const id=crypto.randomUUID(),filename=path.basename(filePath);
+        const relativePath=relativeMediaPath({jid:resolved,kind,id,filename});
+        const destination=path.join(this.dataDir,relativePath);
+        await fs.mkdir(path.dirname(destination),{recursive:true});
+        await fs.copyFile(filePath,destination);
+        this.store.saveMedia({id,filename,mime:mimetype,kind,relativePath,size:stat.size});
+        this.store.linkMedia(normalized,id);
+        this.changed('conversas');
+      }catch(e){this.reportError('salvar_anexo_enviado',e);}
+    }
     return{id:sent?.key?.id||''};
   }
   async profile(jid){
