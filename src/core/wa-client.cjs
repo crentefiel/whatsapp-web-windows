@@ -43,6 +43,14 @@ class WhatsAppClient{
           if(!loggedOut&&!this.closed)this.scheduleRetry();
         }
       });
+      sock.ev.on('messages.update',(updates)=>{
+        const completed=(updates||[]).filter(x=>x?.key&&x?.update?.message).map(x=>({
+          key:x.key,message:x.update.message,
+          messageTimestamp:x.update.messageTimestamp||Math.floor(Date.now()/1000)
+        }));
+        if(completed.length)void this.ingest(completed,'atualizacao',sock)
+          .catch(e=>this.reportError('atualizacao_mensagens',e));
+      });
       sock.ev.on('messages.upsert',({messages=[],type})=>{
         this.status.upserts++;this.update({lastEvent:new Date().toISOString()});
         void this.ingest(messages,type==='append'?'sincronizacao':'tempo_real',sock)
@@ -111,7 +119,13 @@ class WhatsAppClient{
             }
             this.status.lastSaved=new Date().toISOString();
           }
-        }else duplicates++;
+        }else{
+          duplicates++;
+          if(this.store.upgrade?.(m)){
+            anySaved=true;
+            this.status.lastSaved=new Date().toISOString();
+          }
+        }
         // Atualizar mídias incompletas quando um evento válido reaparece.
         if(source!=='envio'&&m.media&&m.media.size<=MEDIA_LIMIT&&(!exists||!this.store.linkedMedia(m))){
           pendingMedia.push({raw,m});
