@@ -1,55 +1,42 @@
 name: Gerar e verificar instalador Windows
-
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/baileys-client-foundation']
     paths:
       - 'src/**'
       - 'test/**'
       - 'package.json'
       - '.github/workflows/windows-installer.yml'
   workflow_dispatch:
-
 jobs:
   instalador:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Baixar repositório
         uses: actions/checkout@v4
-
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
       - name: Instalar dependências
         run: npm install --no-audit --no-fund
-
       - name: Verificar sintaxe
-        shell: cmd
-        run: |
-          node --check src\main.cjs
-          node --check src\security.cjs
-          node --check test\security.test.cjs
-
+        run: npm run check
       - name: Executar testes locais
         run: npm test
-
       - name: Gerar instalador NSIS x64
         run: npm run package:windows
-
       - name: Conferir executável gerado
         shell: pwsh
         run: |
           $files = Get-ChildItem 'release' -Filter '*.exe' -File
           if ($files.Count -lt 1) { throw 'Nenhum instalador .exe gerado' }
           $files | Select-Object Name,Length | Format-Table -AutoSize
-
-      - name: Disponibilizar instalador para teste presencial
+      - name: Disponibilizar instalador
         uses: actions/upload-artifact@v4
         with:
-          name: whatsapp-web-windows-installer
+          name: whatsapp-desktop-baileys-installer
           path: release/*.exe
           if-no-files-found: error
           retention-days: 14
