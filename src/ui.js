@@ -19,6 +19,8 @@ async function status(){
    const labels={conectado:'Conectado',conectando:'Conectando...',aguardando_qr:'Aguardando QR Code',desconectado:'Desconectado',erro:'Erro',reconectando:'Reconectando...',sessao_encerrada:'Sessão encerrada'};
    $('state').textContent=labels[s.state]||s.state;
    $('connect').disabled=['conectando','aguardando_qr','conectado','reconectando'].includes(s.state);
+   $('repair').hidden=!['desconectado','aguardando_qr','reconectando','sessao_encerrada','erro'].includes(s.state);
+   $('repair').disabled=Boolean(s.state==='conectando');
    $('qrcode').hidden=!s.qr;if(s.qr)$('qr').src=s.qr;
    $('detail').textContent=s.detail||'';
    $('health').textContent='Mensagens salvas: '+(s.received||0)+' · Erros: '+(s.errors||0)+' · Último evento: '+(s.lastEvent?dateString(s.lastEvent):'nenhum')+' · Última gravação: '+(s.lastSaved?dateString(s.lastSaved):'nenhuma');
@@ -89,6 +91,9 @@ async function reload(kind){
  }finally{reloading=false;}
 }
 $('connect').addEventListener('click',async()=>{error('');try{await window.whatsapp.start();await status();}catch(e){error(e.message);}});
+$('repair').addEventListener('click',async()=>{
+ error('');try{const result=await window.whatsapp.repair();if(!result?.canceled)await status();}catch(e){error(e.message);}
+});
 $('search').addEventListener('input',renderChats);
 $('messageInput').addEventListener('input',refreshComposer);
 $('refreshPhoto').addEventListener('click',async()=>{if(!selected)return;try{const url=await window.whatsapp.profile(selected);photo(selected,url);}catch(e){error(e.message);}});
