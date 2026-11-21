@@ -219,6 +219,7 @@ class AutoResponder{
   const verifiedRules=memory?.rules?.map(x=>x.content.slice(0,500)).join('\\n')||'';
   const additional=memory?[
    'Consulte a memória do atendimento deste MESMO cliente. Exemplos observados mostram estilo, não comprovam preços nem políticas atuais.',
+   memory.globalStyle||'',
    verifiedRules?'Regras aprovadas pelo proprietário:\\n'+verifiedRules:'',
    humanExamples?'Exemplos de perguntas e respostas humanas deste cliente:\\n'+humanExamples:'',
    'Nunca invente preços, prazos ou medidas. Se faltar uma regra oficial, peça confirmação humana.'
