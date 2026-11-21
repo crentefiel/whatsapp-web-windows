@@ -30,7 +30,7 @@
 
    <div class="settings-group ai-settings">
     <h3>Inteligência artificial</h3>
-    <p class="small">API compatível com OpenAI. A IA fica desligada até você configurar e ativar. Somente contatos que você autorizar recebem respostas automáticas. Mensagens selecionadas serão enviadas à API que você informar.</p>
+    <p class="small">Configuração da API compatível com OpenAI. As respostas somente serão enviadas no modo Automático, escolhido separadamente em Memória e aprendizado. No modo Observação, a IA apenas acompanha suas respostas humanas. Mensagens de contexto podem ser enviadas ao provedor quando houver sugestão ou resposta automática.</p>
     <form id="aiForm" class="ai-form">
       <label>URL base da API
         <input id="aiBaseUrl" type="url" placeholder="https://api.openai.com/v1" required autocomplete="off">
@@ -54,7 +54,7 @@
       <p id="aiScopeHelp" class="small">No modo selecionado, abra uma conversa e clique em “Autorizar IA”. No modo todos, cada contato individual que enviar texto novo poderá receber resposta da IA. As mensagens de contexto poderão ser enviadas ao provedor configurado.</p>
       <label class="ai-check">
         <input id="aiEnabled" type="checkbox">
-        Ativar respostas automáticas no modo escolhido
+        Habilitar envio automático quando o modo Automático for confirmado
       </label>
       <p id="aiAllowedCount" class="small">Contatos autorizados: 0</p>
       <p id="aiHealth" class="small">Respostas automáticas enviadas: 0 · Falhas: 0</p>
