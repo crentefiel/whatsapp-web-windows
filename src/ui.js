@@ -45,7 +45,7 @@ function renderChats(){
 async function conversations(){try{chats=await window.whatsapp.conversations();renderChats();}catch(e){error(e.message);}}
 async function choose(c){
  selected=c.jid;$('contactTitle').textContent=c.name||readable(c.jid);$('contactJid').textContent=c.jid;
- $('refreshPhoto').hidden=false;photo(c.jid,c.photo);renderChats();refreshComposer();await messages();await status();
+ $('refreshPhoto').hidden=false;$('openContactFolder').hidden=false;photo(c.jid,c.photo);renderChats();refreshComposer();await messages();await status();
 }
 function mediaElement(m){
  if(!m.media_id)return null;
