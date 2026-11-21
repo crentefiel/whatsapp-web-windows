@@ -137,10 +137,10 @@ class AutoResponder{
   const mode=this.learning?.mode()||'automatic';
   if(mode==='observation'){this.skip('Modo observação: sem resposta automática');return;}
   const config=this.settings.public();
+  if(mode==='automatic'&&!config.enabled){this.skip('IA desativada');return;}
   const scoped=config.responseScope==='all'||config.allowedJids.some(x=>(this.store.resolveJid?.(x)||x)===jid);
   if(!scoped){this.skip('Contato sem autorização');return;}
   if(this.learning?.humanHold(jid)){this.skip('Atendimento humano em andamento');return;}
-  if(mode==='automatic'&&!config.enabled){this.skip('IA desativada');return;}
   if(mode==='suggestion'&&!config.model){this.skip('Modelo de IA não configurado');return;}
   if(mode==='automatic'&&!this.allowed(jid)){this.skip('Contato sem autorização');return;}
   this.latestIncoming.set(jid,m);
