@@ -38,7 +38,7 @@ test('IA inicia desativada, configuração persiste e chave nunca fica em texto 
 }));
 
 test('nunca ativa respostas para todos; exige contato autorizado e chave para API externa',()=>withSettings(settings=>{
- assert.throws(()=>settings.update({model:'x',enabled:true}),/autorize pelo menos um contato/);
+ assert.throws(()=>settings.update({model:'x',enabled:true}),/Autorize um contato/);
  settings.update({model:'modelo',allowedJids:[JID]});
  assert.throws(()=>settings.update({enabled:true}),/chave da API/);
  settings.update({baseUrl:'http://localhost:11434/v1',enabled:true});
