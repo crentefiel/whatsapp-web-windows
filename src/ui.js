@@ -1,6 +1,15 @@
 'use strict';
 const $=id=>document.getElementById(id);
 let selected=null,chats=[],reloading=false,pendingStatus=false,pendingConversations=false;
+let currentState='desconectado',sendingText=false,sendingFile=false;
+function refreshComposer(){
+ const hasContact=Boolean(selected),connected=currentState==='conectado';
+ $('messageInput').disabled=!hasContact;
+ $('sendButton').disabled=!hasContact||!connected||sendingText||!$('messageInput').value.trim();
+ $('attachmentType').disabled=!hasContact||!connected||sendingFile;
+ $('sendFile').disabled=!hasContact||!connected||sendingFile;
+ $('composerHint').textContent=!hasContact?'Escolha um contato para escrever.':connected?'':'Sem conexão: você pode escrever, e o envio será liberado quando o WhatsApp reconectar.';
+}
 function error(message){$('error').textContent=String(message||'').slice(0,220);}
 function readable(jid){return String(jid||'').split('@')[0];}
 function dateString(ms){const value=typeof ms==='string'&&ms.includes('T')?Date.parse(ms):Number(ms);return new Date(Number.isFinite(value)?value:Date.now()).toLocaleString('pt-BR');}
@@ -13,8 +22,8 @@ async function status(){
    $('qrcode').hidden=!s.qr;if(s.qr)$('qr').src=s.qr;
    $('detail').textContent=s.detail||'';
    $('health').textContent='Mensagens salvas: '+(s.received||0)+' · Erros: '+(s.errors||0)+' · Último evento: '+(s.lastEvent?dateString(s.lastEvent):'nenhum')+' · Última gravação: '+(s.lastSaved?dateString(s.lastSaved):'nenhuma');
-   const canSend=s.state==='conectado'&&selected;
-   for(const id of ['messageInput','sendButton','attachmentType','sendFile'])$(id).disabled=!canSend;
+   currentState=s.state;
+   refreshComposer();
  }catch(e){error(e.message);}
 }
 function photo(_jid,src){
@@ -36,7 +45,7 @@ function renderChats(){
 async function conversations(){try{chats=await window.whatsapp.conversations();renderChats();}catch(e){error(e.message);}}
 async function choose(c){
  selected=c.jid;$('contactTitle').textContent=c.name||readable(c.jid);$('contactJid').textContent=c.jid;
- $('refreshPhoto').hidden=false;photo(c.jid,c.photo);renderChats();await messages();await status();
+ $('refreshPhoto').hidden=false;photo(c.jid,c.photo);renderChats();refreshComposer();await messages();await status();
 }
 function mediaElement(m){
  if(!m.media_id)return null;
@@ -81,12 +90,22 @@ async function reload(kind){
 }
 $('connect').addEventListener('click',async()=>{error('');try{await window.whatsapp.start();await status();}catch(e){error(e.message);}});
 $('search').addEventListener('input',renderChats);
+$('messageInput').addEventListener('input',refreshComposer);
 $('refreshPhoto').addEventListener('click',async()=>{if(!selected)return;try{const url=await window.whatsapp.profile(selected);photo(selected,url);}catch(e){error(e.message);}});
 $('sendForm').addEventListener('submit',async e=>{
- e.preventDefault();const value=$('messageInput').value;if(!selected||!value.trim())return;
- $('sendButton').disabled=true;try{await window.whatsapp.sendText(selected,value);$('messageInput').value='';await reload('conversas');}
- catch(err){error(err.message);}finally{await status();}
+ e.preventDefault();const value=$('messageInput').value;if(!selected||!value.trim()||sendingText)return;
+ if(currentState!=='conectado'){error('Aguarde o WhatsApp reconectar para enviar.');return;}
+ sendingText=true;refreshComposer();error('');
+ try{await window.whatsapp.sendText(selected,value);$('messageInput').value='';await reload('conversas');}
+ catch(err){error(err.message);}finally{sendingText=false;await status();}
 });
-$('sendFile').addEventListener('click',async()=>{if(!selected)return;error('');try{await window.whatsapp.sendFile(selected,$('attachmentType').value,'');await reload('conversas');}catch(e){error(e.message);}});
+$('sendFile').addEventListener('click',async()=>{
+ if(!selected||sendingFile)return;
+ if(currentState!=='conectado'){error('Aguarde o WhatsApp reconectar para enviar arquivos.');return;}
+ sendingFile=true;refreshComposer();error('');
+ try{await window.whatsapp.sendFile(selected,$('attachmentType').value,'');await reload('conversas');}
+ catch(e){error(e.message);}finally{sendingFile=false;await status();}
+});
 window.whatsapp.onChange(kind=>{reload(kind).catch(e=>error(e.message));});
+refreshComposer();
 reload('conversas').catch(e=>error(e.message));
