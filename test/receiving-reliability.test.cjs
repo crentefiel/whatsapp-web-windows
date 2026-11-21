@@ -109,3 +109,21 @@ test('placeholder inicial não impede o conteúdo real recebido depois',async()=
  await client.ingest([placeholder],'tempo_real',{});
  assert.equal(store.messages(PN)[0].body,'agora o texto chegou');
 }));
+
+test('arquivo enviado fica salvo localmente e não é baixado outra vez pela rede',async()=>withClient(async({folder,store,client})=>{
+ const filename='apresentacao.pptx',file=path.join(folder,filename);
+ const bytes=Buffer.from([80,75,3,4,1,2,3,4]);await fs.writeFile(file,bytes);
+ client.status.state='conectado';
+ client.socket={sendMessage:async(jid,payload)=>({
+  key:{remoteJid:jid,id:'out-pptx',fromMe:true},
+  message:{documentMessage:{fileName:payload.fileName,mimetype:payload.mimetype,fileLength:bytes.length}},
+  messageTimestamp:1795000090
+ })};
+ client.downloadMedia=async()=>{throw Error('Saída não deve fazer download');};
+ await client.sendAttachment(PN,file,'document');
+ const msg=store.messages(PN)[0],media=store.getMedia(msg.media_id);
+ assert.equal(msg.kind,'document');
+ assert.equal(media.filename,filename);
+ assert.deepEqual(await fs.readFile(resolveStoredMedia(folder,media.relative_path)),bytes);
+ assert.equal(client.status.mediaErrors,0);
+}));
