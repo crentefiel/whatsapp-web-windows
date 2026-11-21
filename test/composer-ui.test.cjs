@@ -17,7 +17,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 test('campo de texto aceita digitação offline e envio/anexos liberam após conectar',async()=>{
   const elements=new Map();
   const get=id=>{if(!elements.has(id))elements.set(id,mockElement(id));return elements.get(id);};
-  const sent=[],files=[];let state='desconectado',onChange=null;
+  const sent=[],files=[],opened=[];let state='desconectado',onChange=null;
   const document={
     getElementById:get,
     createElement:()=>mockElement(),
