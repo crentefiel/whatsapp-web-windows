@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('whatsapp',Object.freeze({
  aiSave:config=>call('aiSave',config),
  aiContact:(jid,allow)=>call('aiContact',jid,allow),
  aiDiagnostics:()=>call('aiDiagnostics'),
+ aiTest:()=>call('aiTest'),
  onChange:callback=>{
    if(typeof callback!=='function')return()=>{};
    const listener=(_event,kind)=>callback(kind);ipcRenderer.on('dados:alterados',listener);
