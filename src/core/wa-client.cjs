@@ -118,10 +118,6 @@ class WhatsAppClient{
         if(!exists){
           if(this.store.save(m)){
             this.status.saved++;anySaved=true;
-            // Responder somente após salvar; IA nunca bloqueia ingestão.
-            if(source==='tempo_real'&&!m.fromMe&&m.type==='text'){
-              try{this.onIncoming?.(m,source);}catch(e){this.reportError('ia_evento',e);}
-            }
             if(!m.fromMe){
               this.status.received++;
               this.status.lastIncoming=new Date().toISOString();
@@ -134,6 +130,11 @@ class WhatsAppClient{
             anySaved=true;
             this.status.lastSaved=new Date().toISOString();
           }
+        }
+        // O Baileys às vezes entrega append e depois notify do mesmo ID.
+        // A IA decide se o evento notify é novo e trata duplicatas/idade.
+        if(source==='tempo_real'&&!m.fromMe&&m.type==='text'){
+          try{this.onIncoming?.(m,source);}catch(e){this.reportError('ia_evento',e);}
         }
         // Atualizar mídias incompletas quando um evento válido reaparece.
         if(source!=='envio'&&m.media&&m.media.size<=MEDIA_LIMIT&&(!exists||!this.store.linkedMedia(m))){
