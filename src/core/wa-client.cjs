@@ -2,14 +2,16 @@
 const fs=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto');
 const {normalizeMessage,isAllowedJid,MEDIA_LIMIT}=require('./messages.cjs');
 const {saveIncomingBuffer}=require('./media-storage.cjs');
+const {archiveBaileysSession}=require('./session.cjs');
 class WhatsAppClient{
   constructor({dataDir,store,changed}){
-    this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;
+    this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;this.sessionExpired=false;
     this.status={state:'desconectado',qr:null,lastEvent:null,lastSaved:null,received:0,errors:0,detail:''};this.logger=null;
   }
   update(patch){Object.assign(this.status,patch);this.changed('status');}
   async start(){
     if(this.starting||this.socket)return;
+    clearTimeout(this.retryTimer);this.retryTimer=null;
     this.closed=false;this.starting=true;this.update({state:'conectando',qr:null,detail:''});
     try{
       const b=await import('@whiskeysockets/baileys'),pino=(await import('pino')).default;
@@ -22,14 +24,21 @@ class WhatsAppClient{
       sock.ev.on('connection.update',async({connection,qr,lastDisconnect})=>{
         if(this.socket!==sock)return;
         if(qr){
-          const QRCode=(await import('qrcode')).default;
-          this.update({state:'aguardando_qr',qr:await QRCode.toDataURL(qr,{margin:2,width:280})});
+          try{
+            const QRCode=(await import('qrcode')).default;
+            const image=await QRCode.toDataURL(qr,{margin:2,width:280});
+            if(this.socket===sock)this.update({state:'aguardando_qr',qr:image,detail:'Leia o QR pelo WhatsApp do celular.'});
+          }catch(e){this.reportError('geracao_qr',e);}
         }
-        if(connection==='open')this.update({state:'conectado',qr:null,detail:''});
+        if(connection==='open'){
+          this.sessionExpired=false;
+          this.update({state:'conectado',qr:null,detail:''});
+        }
         if(connection==='close'){
           const code=lastDisconnect?.error?.output?.statusCode,loggedOut=code===b.DisconnectReason.loggedOut;
-          this.socket=null;this.update({state:loggedOut?'sessao_encerrada':'reconectando',qr:null,
-            detail:loggedOut?'Vincule novamente pelo QR; sessão não apagada.':'Conexão encerrada ('+(code||'sem código')+').'});
+          this.socket=null;this.sessionExpired=loggedOut;
+          this.update({state:loggedOut?'sessao_encerrada':'reconectando',qr:null,
+            detail:loggedOut?'A sessão foi recusada. Use "Novo QR" para arquivar a sessão antiga e vincular novamente.':'Conexão encerrada ('+(code||'sem código')+'). Tentando novamente.'});
           if(!loggedOut&&!this.closed)this.scheduleRetry();
         }
       });
@@ -108,7 +117,24 @@ class WhatsAppClient{
     try{const url=await this.socket.profilePictureUrl(jid,'image');if(url){this.store.photo(jid,url);this.changed('conversas');}return url||null;}
     catch{return null;}
   }
-  stop(){this.closed=true;clearTimeout(this.retryTimer);this.retryTimer=null;const sock=this.socket;this.socket=null;
-    try{sock?.ws?.close();}catch{}this.update({state:'desconectado',qr:null});}
+  async repairSession(){
+    if(this.status.state==='conectado')throw Error('A sessão está conectada; não é necessário refazer o QR.');
+    if(this.starting)throw Error('Conexão em andamento. Tente novamente após a tentativa terminar.');
+    // Somente por ação confirmada do usuário: nunca elimina arquivos, histórico ou credenciais.
+    this.stop();
+    const archived=archiveBaileysSession(this.dataDir);
+    await this.start();
+    return{archived:Boolean(archived)};
+  }
+  stop(){
+    this.closed=true;clearTimeout(this.retryTimer);this.retryTimer=null;
+    const sock=this.socket;this.socket=null;
+    try{
+      sock?.ev?.removeAllListeners?.('connection.update');
+      sock?.ev?.removeAllListeners?.('creds.update');
+      sock?.ws?.close();
+    }catch{}
+    this.update({state:'desconectado',qr:null});
+  }
 }
 module.exports={WhatsAppClient};
