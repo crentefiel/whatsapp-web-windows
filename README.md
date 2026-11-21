@@ -15,7 +15,7 @@ Aplicativo desktop independente em Electron, com **conexão WhatsApp pelo Bailey
 - SQLite WAL, histórico persistente e prevenção de mensagens duplicadas.
 - Conversas e nomes, com preservação dos identificadores `@lid` e `@s.whatsapp.net` sem deduzir associação indevida.
 - Recebimento e visualização de texto, imagem, áudio, vídeo e documento, quando os dados estão disponíveis.
-- Envio **manual** de texto e arquivos: imagem, vídeo, áudio e documento.
+- Envio **manual** de texto, fotos, vídeos e áudio em arquivo. A opção **Documento / qualquer arquivo** aceita PDF, Word (DOC/DOCX), Excel (XLS/XLSX), PowerPoint (PPT/PPTX), ZIP, CDR e outras extensões, dentro do limite atual do aplicativo de 100 MB por arquivo (sujeito a limites do WhatsApp).\n- Documentos, áudios, imagens e vídeos recebidos são armazenados binariamente no disco, em pastas separadas por contato e categoria. No cabeçalho da conversa, **Arquivos do contato** abre essa pasta no Windows.
 - Consulta sob demanda de foto de perfil quando disponível.
 - Indicadores da última mensagem processada, última gravação e erros.
 
