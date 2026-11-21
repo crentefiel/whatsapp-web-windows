@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto');
 const {normalizeMessage,isAllowedJid,MEDIA_LIMIT}=require('./messages.cjs');
-const {relativeMediaPath}=require('./media-files.cjs');
+const {saveIncomingBuffer}=require('./media-storage.cjs');
 class WhatsAppClient{
   constructor({dataDir,store,changed}){
     this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;
@@ -65,10 +65,10 @@ class WhatsAppClient{
             const b=await import('@whiskeysockets/baileys');
             const buf=await b.downloadMediaMessage(raw,'buffer',{}, {logger:this.logger,reuploadRequest:sock.updateMediaMessage});
             if(buf.length<=MEDIA_LIMIT){
-              const id=crypto.randomUUID(),relativePath=relativeMediaPath({jid:m.jid,kind:m.media.kind,id,filename:m.media.filename});
-              await fs.mkdir(path.dirname(path.join(this.dataDir,relativePath)),{recursive:true});
-              await fs.writeFile(path.join(this.dataDir,relativePath),buf,{flag:'wx'});
-              this.store.saveMedia({id,filename:m.media.filename,mime:m.media.mime,kind:m.media.kind,relativePath,size:buf.length});
+              const id=crypto.randomUUID();
+              const {relativePath,size}=await saveIncomingBuffer(this.dataDir,
+                {jid:m.jid,kind:m.media.kind,id,filename:m.media.filename},buf);
+              this.store.saveMedia({id,filename:m.media.filename,mime:m.media.mime,kind:m.media.kind,relativePath,size});
               mediaId=id;
             }
           }catch(e){this.reportError('download_midia',e);}
