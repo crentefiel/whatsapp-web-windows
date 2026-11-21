@@ -28,7 +28,7 @@ async function loadAi(){
   $('aiEnabled').checked=Boolean(aiConfig.enabled);
   $('aiAllowedCount').textContent='Contatos autorizados: '+aiConfig.allowedJids.length;
   const stats=await window.whatsapp.aiDiagnostics();
-  $('aiHealth').textContent='Respostas enviadas: '+(stats.sent||0)+' · Falhas: '+(stats.failed||0)+' · Ignoradas por limite: '+(stats.skipped||0)+(stats.lastError?' · Último erro: '+stats.lastError:'');
+  $('aiHealth').textContent='Entradas avaliadas: '+(stats.observed||0)+' · Agendadas: '+(stats.scheduled||0)+' · Chamadas à API: '+(stats.apiCalls||0)+' · Respostas enviadas: '+(stats.sent||0)+' · Falhas: '+(stats.failed||0)+' · Ignoradas: '+(stats.skipped||0)+(stats.lastError?' · Último erro: '+stats.lastError:'')+(stats.lastSkip?' · Último bloqueio: '+stats.lastSkip:'');
   $('aiKeyStatus').textContent=aiConfig.hasKey?'Chave de API protegida e salva. Deixe o campo em branco para mantê-la.':'Nenhuma chave salva (API local pode funcionar sem chave).';
   $('aiClearKey').disabled=!aiConfig.hasKey;
   refreshAiContact();
@@ -146,6 +146,19 @@ $('aiForm').addEventListener('submit',async event=>{
   $('aiResult').textContent=aiConfig.enabled?'IA ativada somente nos contatos autorizados.':'Configurações salvas. IA desativada.';
   await loadAi();
  }catch(e){$('aiResult').textContent=e.message;}
+});
+$('aiTest').addEventListener('click',async()=>{
+ const button=$('aiTest');
+ button.disabled=true;
+ $('aiTestResult').textContent='Testando a API salva, sem enviar mensagens pelo WhatsApp...';
+ try{
+  const result=await window.whatsapp.aiTest();
+  $('aiTestResult').textContent=result.success?
+   'API funcionando. Resposta de teste: '+result.preview:
+   'Falha na API: '+result.error;
+  await loadAi();
+ }catch(e){$('aiTestResult').textContent='Falha no teste: '+e.message;}
+ finally{button.disabled=false;}
 });
 $('aiClearKey').addEventListener('click',async()=>{
  try{
