@@ -106,3 +106,71 @@ test('desativar IA durante a consulta impede resposta mesmo se a API responder',
   responder.stop();
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('botão de teste consulta a API com mensagem sintética, sem tocar no WhatsApp',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sorriso-ai-api-test-'));
+ try{
+  const settings=new AiSettings(dir,fakeVault);
+  settings.update({baseUrl:'http://localhost:11434/v1',model:'teste-local',enabled:false});
+  const calls=[];let sends=0;
+  const responder=new AutoResponder({
+   settings,client:{status:{state:'conectado'},sendText:async()=>{sends++;}},
+   store:{messages:()=>[],resolveJid:j=>j},
+   fetchImpl:async(url,opts)=>{
+    calls.push({url,options:JSON.parse(opts.body)});
+    return{ok:true,text:async()=>JSON.stringify({choices:[{message:{content:'OK'}}]})};
+   }
+  });
+  const result=await responder.testConnection();
+  assert.equal(result.success,true);
+  assert.equal(result.preview,'OK');
+  assert.equal(calls.length,1);
+  assert.match(calls[0].options.messages[1].content,/Teste técnico de conexão/);
+  assert.equal(sends,0,'teste API nunca deve mandar mensagem ao contato');
+  assert.equal(responder.stats.apiCalls,1);
+  responder.stop();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('erros de autenticação e de rede são exibidos sem expor a chave da API',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sorriso-ai-api-erro-'));
+ try{
+  const settings=new AiSettings(dir,fakeVault);
+  const secret='SEGREDO-SINTETICO';
+  settings.update({baseUrl:'https://api.exemplo.com/v1',model:'modelo',apiKey:secret,enabled:false});
+  const responder=new AutoResponder({
+   settings,client:{status:{state:'conectado'}},
+   store:{resolveJid:j=>j,messages:()=>[]},
+   fetchImpl:async()=>({ok:false,status:401})
+  });
+  const auth=await responder.testConnection();
+  assert.equal(auth.success,false);
+  assert.match(auth.error,/401\/403/);
+  assert.doesNotMatch(JSON.stringify(auth),new RegExp(secret));
+  assert.doesNotMatch(JSON.stringify(responder.stats),new RegExp(secret));
+  responder.fetch=async()=>{throw Error('fetch failed');};
+  const network=await responder.testConnection();
+  assert.equal(network.success,false);
+  assert.match(network.error,/conexão/);
+  responder.stop();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('diagnóstico mostra por que novas mensagens não disparam: desativada, autorização, não elegível',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sorriso-ai-diagnostico-'));
+ try{
+  const settings=new AiSettings(dir,fakeVault);
+  const client={status:{state:'conectado'}},store={resolveJid:j=>j};
+  const responder=new AutoResponder({settings,client,store});
+  responder.handleIncoming(incoming(JID),'tempo_real');
+  assert.equal(responder.stats.observed,1);
+  assert.equal(responder.stats.lastSkip,'IA desativada');
+  settings.update({baseUrl:'http://localhost:11434/v1',model:'teste',enabled:false});
+  settings.update({allowedJids:[SECOND],enabled:true});
+  responder.handleIncoming(incoming(JID),'tempo_real');
+  assert.equal(responder.stats.lastSkip,'Contato sem autorização');
+  responder.handleIncoming({...incoming(SECOND),type:'image'},'tempo_real');
+  assert.equal(responder.stats.lastSkip,'Mensagem não elegível');
+  responder.stop();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
