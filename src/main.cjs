@@ -5,7 +5,7 @@ const {Store}=require('./core/database.cjs');
 const {WhatsAppClient}=require('./core/wa-client.cjs');
 const {isAllowedJid}=require('./core/messages.cjs');
 const {hasSavedBaileysSession}=require('./core/session.cjs');
-const {resolveStoredMedia}=require('./core/media-files.cjs');
+const {resolveStoredMedia,contactFolder}=require('./core/media-files.cjs');
 protocol.registerSchemesAsPrivileged([{scheme:'sorriso',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 let window=null,store=null,client=null;
 if(!app.requestSingleInstanceLock())app.quit();
