@@ -8,7 +8,9 @@ Aplicativo desktop independente em Electron, com **conexão WhatsApp pelo Bailey
 
 - QR Code de pareamento Baileys na janela Windows após clicar **Conectar WhatsApp**.
 - Credenciais em pasta local do aplicativo; sem reutilizar sessão do projeto antigo.
+- Retomada automática ao reabrir o aplicativo quando já há uma sessão Baileys salva; primeiro pareamento continua manual.
 - Reconexão após quedas, sem logout automático nem exclusão da sessão.
+- Campo de mensagem disponível para escrever rascunho com contato selecionado mesmo offline; envio de texto e arquivos somente quando conectado.
 - Eventos de recebimento e sincronização oferecidos pela biblioteca.
 - SQLite WAL, histórico persistente e prevenção de mensagens duplicadas.
 - Conversas e nomes, com preservação dos identificadores `@lid` e `@s.whatsapp.net` sem deduzir associação indevida.
