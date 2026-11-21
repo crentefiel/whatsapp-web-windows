@@ -39,6 +39,17 @@ async function startApp(){
  });
  api('whatsapp:status',()=>({...client.status}));
  api('whatsapp:start',()=>client.start());
+ api('whatsapp:repair',async()=>{
+   if(client.status.state==='conectado')throw Error('O WhatsApp já está conectado.');
+   const choice=await dialog.showMessageBox(window,{
+     type:'warning',title:'Gerar um novo QR Code',
+     message:'Deseja vincular o WhatsApp novamente?',
+     detail:'A sessão anterior será guardada em uma pasta de backup. Suas conversas, documentos e outros dados locais não serão excluídos. Você precisará escanear um novo QR Code no celular.',
+     buttons:['Cancelar','Guardar sessão e gerar novo QR'],defaultId:0,cancelId:0,noLink:true
+   });
+   if(choice.response!==1)return{canceled:true};
+   return client.repairSession();
+ });
  api('whatsapp:conversations',()=>store.conversations());
  api('whatsapp:messages',jid=>{if(!isAllowedJid(jid))throw Error('Identificador inválido');return store.messages(jid);});
  api('whatsapp:sendText',(jid,text)=>client.sendText(jid,text));
