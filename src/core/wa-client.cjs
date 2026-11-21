@@ -53,7 +53,7 @@ class WhatsAppClient{
       });
       sock.ev.on('messages.upsert',({messages=[],type})=>{
         this.status.upserts++;this.update({lastEvent:new Date().toISOString()});
-        void this.ingest(messages,type==='append'?'sincronizacao':'tempo_real',sock)
+        void this.ingest(messages,type==='notify'?'tempo_real':'sincronizacao',sock)
           .catch(e=>this.reportError('evento_recebimento',e));
       });
       sock.ev.on('messaging-history.set',({contacts=[],chats=[],messages=[]})=>{
@@ -113,6 +113,10 @@ class WhatsAppClient{
         if(!exists){
           if(this.store.save(m)){
             this.status.saved++;anySaved=true;
+            // Responder somente após salvar; IA nunca bloqueia ingestão.
+            if(source==='tempo_real'&&!m.fromMe&&m.type==='text'){
+              try{this.onIncoming?.(m,source);}catch(e){this.reportError('ia_evento',e);}
+            }
             if(!m.fromMe){
               this.status.received++;
               this.status.lastIncoming=new Date().toISOString();
