@@ -7,7 +7,7 @@ const {archiveBaileysSession}=require('./session.cjs');
 class WhatsAppClient{
   constructor({dataDir,store,changed}){
     this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;this.sessionExpired=false;this.recentMessages=new Map();
-    this.status={state:'desconectado',qr:null,lastEvent:null,lastSaved:null,lastIncoming:null,received:0,saved:0,upserts:0,ignored:0,duplicates:0,errors:0,mediaErrors:0,detail:''};this.logger=null;
+    this.status={state:'desconectado',qr:null,lastEvent:null,lastSaved:null,lastIncoming:null,received:0,saved:0,upserts:0,upsertsNotify:0,upsertsAppend:0,upsertsOther:0,lastUpsertType:null,ignored:0,duplicates:0,errors:0,mediaErrors:0,detail:''};this.logger=null;
   }
   update(patch){Object.assign(this.status,patch);this.changed('status');}
   async start(){
@@ -52,7 +52,12 @@ class WhatsAppClient{
           .catch(e=>this.reportError('atualizacao_mensagens',e));
       });
       sock.ev.on('messages.upsert',({messages=[],type})=>{
-        this.status.upserts++;this.update({lastEvent:new Date().toISOString()});
+        this.status.upserts++;
+        if(type==='notify')this.status.upsertsNotify++;
+        else if(type==='append')this.status.upsertsAppend++;
+        else this.status.upsertsOther++;
+        this.status.lastUpsertType=String(type||'desconhecido').slice(0,24);
+        this.update({lastEvent:new Date().toISOString()});
         void this.ingest(messages,type==='notify'?'tempo_real':'sincronizacao',sock)
           .catch(e=>this.reportError('evento_recebimento',e));
       });
