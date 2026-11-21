@@ -53,7 +53,7 @@ async function startApp(){
    const normalized=store.resolveJid(jid);
    const others=config.allowedJids.filter(x=>store.resolveJid(x)!==normalized);
    if(allow)others.push(normalized);
-   const updated=aiSettings.update({allowedJids:others,enabled:config.enabled&&others.length>0});
+   const updated=aiSettings.update({allowedJids:others,enabled:config.enabled&&(config.responseScope==='all'||others.length>0)});
    changed('ai');return updated;
  });
  api('whatsapp:aiDiagnostics',()=>({...aiResponder.stats}));
@@ -61,10 +61,10 @@ async function startApp(){
  api('whatsapp:copyDiagnostics',()=>{
    // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
    const {qr,...diagnostics}=client.status;
-   const {enabled,allowedJids}=aiSettings.public();
+   const {enabled,allowedJids,responseScope}=aiSettings.public();
    const {sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}=aiResponder.stats;
    clipboard.writeText(JSON.stringify({appVersion:app.getVersion(),...diagnostics,
-     ai:{enabled,allowedContacts:allowedJids.length,sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}},null,2));
+     ai:{enabled,responseScope,allowedContacts:allowedJids.length,sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}},null,2));
    return{copied:true};
  });
  api('whatsapp:start',()=>client.start());
