@@ -10,6 +10,11 @@ function refreshComposer(){
  $('sendFile').disabled=!hasContact||!connected||sendingFile;
  $('composerHint').textContent=!hasContact?'Escolha um contato para escrever.':connected?'':'Sem conexão: você pode escrever, e o envio será liberado quando o WhatsApp reconectar.';
 }
+function toggleSettings(open){
+ $('settingsPanel').hidden=!open;
+ $('openSettings').setAttribute('aria-expanded',String(open));
+ if(open){$('closeSettings').focus();}else{$('openSettings').focus();}
+}
 function error(message){$('error').textContent=String(message||'').slice(0,220);}
 function readable(jid){return String(jid||'').split('@')[0];}
 function dateString(ms){const value=typeof ms==='string'&&ms.includes('T')?Date.parse(ms):Number(ms);return new Date(Number.isFinite(value)?value:Date.now()).toLocaleString('pt-BR');}
@@ -18,6 +23,7 @@ async function status(){
    const s=await window.whatsapp.status();
    const labels={conectado:'Conectado',conectando:'Conectando...',aguardando_qr:'Aguardando QR Code',desconectado:'Desconectado',erro:'Erro',reconectando:'Reconectando...',sessao_encerrada:'Sessão encerrada'};
    $('state').textContent=labels[s.state]||s.state;
+   $('stateBrief').textContent=(labels[s.state]||s.state)+(s.state==='aguardando_qr'?' · QR em Configurações':'');
    $('connect').disabled=['conectando','aguardando_qr','conectado','reconectando'].includes(s.state);
    $('repair').hidden=!['desconectado','aguardando_qr','reconectando','sessao_encerrada','erro'].includes(s.state);
    $('repair').disabled=Boolean(s.state==='conectando');
@@ -90,6 +96,11 @@ async function reload(kind){
    }
  }finally{reloading=false;}
 }
+$('openSettings').addEventListener('click',()=>toggleSettings(true));
+$('closeSettings').addEventListener('click',()=>toggleSettings(false));
+document.addEventListener('keydown',event=>{
+ if(event.key==='Escape'&&!$('settingsPanel').hidden)toggleSettings(false);
+});
 $('connect').addEventListener('click',async()=>{error('');try{await window.whatsapp.start();await status();}catch(e){error(e.message);}});
 $('repair').addEventListener('click',async()=>{
  error('');try{const result=await window.whatsapp.repair();if(!result?.canceled)await status();}catch(e){error(e.message);}
