@@ -17,6 +17,7 @@ test('UI da engrenagem permite configurar provedor, chave e autorizar contato se
   status:async()=>({state:'conectado',upserts:0,received:0,errors:0}),conversations:async()=>[{jid:JID,name:'Teste',preview:'oi'}],
   messages:async()=>[],onChange:()=>{},aiSettings:async()=>({...config,allowedJids:[...config.allowedJids]}),
   aiDiagnostics:async()=>({sent:0,failed:0,skipped:0}),
+  aiTest:async()=>({success:true,preview:'OK'}),
   aiSave:async patch=>{saved.push(patch);config={...config,...patch,hasKey:config.hasKey||Boolean(patch.apiKey)};delete config.apiKey;return config;},
   aiContact:async(jid,allowed)=>{grants.push({jid,allowed});config.allowedJids=allowed?[jid]:[];return {...config};}
  }};
@@ -45,6 +46,9 @@ test('UI da engrenagem permite configurar provedor, chave e autorizar contato se
  assert.equal($('aiApiKey').value,'','chave não permanece no campo após salvar');
  assert.equal($('aiEnabled').checked,true);
  assert.match($('aiResult').textContent,/IA ativada/);
+ await $('aiTest').handlers.click();
+ assert.match($('aiTestResult').textContent,/API funcionando/);
+ assert.match($('aiTestResult').textContent,/OK/);
  await $('aiContact').handlers.click();await tick();
  assert.equal(grants[1].allowed,false);
  assert.equal($('aiContact').textContent,'Autorizar IA');
