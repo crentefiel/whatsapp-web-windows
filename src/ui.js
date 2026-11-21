@@ -3,6 +3,103 @@ const $=id=>document.getElementById(id);
 let selected=null,chats=[],reloading=false,pendingStatus=false,pendingConversations=false;
 let currentState='desconectado',sendingText=false,sendingFile=false;
 let aiConfig={enabled:false,allowedJids:[],hasKey:false,responseScope:'selected'};
+let learningMode='observation',currentSuggestion=null;
+const learningLabels={
+ observation:'Observação: a IA aprende com suas respostas humanas, mas não sugere nem envia mensagens.',
+ suggestion:'Sugestão: a IA prepara uma resposta editável. Só envia depois da sua aprovação.',
+ automatic:'Automático: a IA responde somente com evidências humanas semelhantes e regras aprovadas.'
+};
+function learningStatus(message){$('learnResult').textContent=message||'';}
+async function loadLearningOverview(){
+ if(typeof window.whatsapp.learnStats!=='function')return;
+ const data=await window.whatsapp.learnStats();
+ learningMode=data.mode;
+ $('learnMode').value=data.mode;
+ $('learnModeHint').textContent=learningLabels[data.mode]||'';
+ $('learnStats').textContent='Exemplos observados: '+data.examples+
+  ' · Aprovados: '+data.approved+' · Clientes na memória: '+data.contacts+
+  ' · Regras aprovadas: '+data.approvedRules;
+}
+function smallDiv(className,content){
+ const node=document.createElement('div');node.className=className;node.textContent=content;
+ return node;
+}
+async function loadLearningDetails(){
+ if(typeof window.whatsapp.learnExamples!=='function')return;
+ const jid=selected;
+ const sampleHost=$('learnExamples'),ruleHost=$('learnRules');
+ if(!jid){
+  sampleHost.replaceChildren(smallDiv('small','Selecione uma conversa para rever exemplos.'));
+ }else{
+  const samples=await window.whatsapp.learnExamples(jid);
+  if(jid!==selected)return;
+  const entries=samples.slice(0,12).map(item=>{
+   const card=document.createElement('div');card.className='learn-example';
+   const question=smallDiv('small','Cliente: '+item.question);
+   const label=smallDiv('small','Sua resposta ('+item.status+'):');
+   const editable=document.createElement('textarea');editable.value=item.reply;editable.rows=3;editable.maxLength=3000;
+   const row=document.createElement('div');row.className='learning-actions';
+   const approve=document.createElement('button');approve.type='button';approve.textContent='Corrigir / aprovar';
+   const reject=document.createElement('button');reject.type='button';reject.className='secondary-action';reject.textContent='Desconsiderar';
+   approve.addEventListener('click',async()=>{
+    try{
+     await window.whatsapp.learnExampleUpdate(item.id,editable.value,'approved');
+     learningStatus('Exemplo aprovado e guardado na memória.');
+     await loadLearningDetails();await loadLearningOverview();
+    }catch(e){learningStatus(e.message);}
+   });
+   reject.addEventListener('click',async()=>{
+    try{
+     await window.whatsapp.learnExampleUpdate(item.id,editable.value,'rejected');
+     learningStatus('Exemplo descartado do aprendizado.');
+     await loadLearningDetails();await loadLearningOverview();
+    }catch(e){learningStatus(e.message);}
+   });
+   row.append(approve,reject);card.append(question,label,editable,row);return card;
+  });
+  sampleHost.replaceChildren(...(entries.length?entries:[smallDiv('small','Ainda sem exemplos deste contato. Continue conversando normalmente ou importe o histórico local.')]));
+ }
+ const rules=await window.whatsapp.learnRules(jid||null);
+ if(jid!==selected)return;
+ const cards=rules.slice(0,25).map(r=>{
+  const card=document.createElement('div');card.className='learn-rule';
+  card.append(smallDiv('small',(r.jid?'Contato':'Empresa')+' · '+r.state),smallDiv('',''+r.content));
+  if(r.state==='draft'){
+   const row=document.createElement('div');row.className='learning-actions';
+   const approve=document.createElement('button');approve.type='button';approve.textContent='Aprovar regra';
+   const reject=document.createElement('button');reject.type='button';reject.className='secondary-action';reject.textContent='Rejeitar';
+   approve.addEventListener('click',async()=>{
+    try{await window.whatsapp.learnApproveRule(r.id,true);await loadLearningDetails();await loadLearningOverview();}
+    catch(e){learningStatus(e.message);}
+   });
+   reject.addEventListener('click',async()=>{
+    try{await window.whatsapp.learnApproveRule(r.id,false);await loadLearningDetails();await loadLearningOverview();}
+    catch(e){learningStatus(e.message);}
+   });
+   row.append(approve,reject);card.append(row);
+  }
+  return card;
+ });
+ ruleHost.replaceChildren(...(cards.length?cards:[smallDiv('small','Nenhuma regra cadastrada.')]));
+ await loadLearningSuggestion();
+}
+async function loadLearningSuggestion(){
+ if(typeof window.whatsapp.learnSuggestion!=='function')return;
+ const jid=selected;
+ if(!jid||learningMode!=='suggestion'){
+  currentSuggestion=null;$('learnSuggestion').hidden=true;return;
+ }
+ const s=await window.whatsapp.learnSuggestion(jid);
+ if(jid!==selected)return;
+ currentSuggestion=s;
+ $('learnSuggestion').hidden=!s;
+ if(s){
+  $('learnSuggestionText').value=s.answer;
+  $('learnSuggestionResult').textContent='';
+ }
+}
+function learningError(e){learningStatus(e?.message||String(e));}
+
 function refreshComposer(){
  const hasContact=Boolean(selected),connected=currentState==='conectado';
  $('messageInput').disabled=!hasContact;
@@ -46,7 +143,10 @@ async function loadAi(){
 function toggleSettings(open){
  $('settingsPanel').hidden=!open;
  $('openSettings').setAttribute('aria-expanded',String(open));
- if(open){$('closeSettings').focus();void loadAi();}else{$('openSettings').focus();}
+ if(open){
+  $('closeSettings').focus();void loadAi();
+  void loadLearningOverview().then(()=>loadLearningDetails()).catch(learningError);
+ }else{$('openSettings').focus();}
 }
 function error(message){$('error').textContent=String(message||'').slice(0,220);}
 function readable(jid){return String(jid||'').split('@')[0];}
@@ -87,6 +187,7 @@ async function conversations(){try{chats=await window.whatsapp.conversations();r
 async function choose(c){
  selected=c.jid;$('contactTitle').textContent=c.name||readable(c.jid);$('contactJid').textContent=c.jid;
  $('refreshPhoto').hidden=false;$('openContactFolder').hidden=false;photo(c.jid,c.photo);renderChats();refreshComposer();refreshAiContact();await messages();await status();
+ void loadLearningDetails().catch(learningError);
 }
 function mediaElement(m){
  if(!m.media_id)return null;
@@ -143,6 +244,52 @@ $('copyDiagnostics').addEventListener('click',async()=>{
  catch(e){error(e.message);}
 });
 $('aiScope').addEventListener('change',refreshAiScope);
+$('learnMode').addEventListener('change',async()=>{
+ const next=$('learnMode').value,previous=learningMode;
+ try{
+  const result=await window.whatsapp.learnMode(next);
+  if(result?.canceled){$('learnMode').value=previous;return;}
+  await loadLearningOverview();
+  learningStatus('Modo atualizado: '+(learningLabels[learningMode]||learningMode));
+  await loadLearningSuggestion();
+ }catch(e){$('learnMode').value=previous;learningError(e);}
+});
+$('learnBackfill').addEventListener('click',async()=>{
+ const btn=$('learnBackfill');btn.disabled=true;
+ learningStatus('Importando exemplos do histórico local, sem usar a API...');
+ try{
+  const report=await window.whatsapp.learnRebuild();
+  learningStatus('Histórico importado: '+report.imported+' novos exemplos, total '+report.total+'. Nenhuma regra ou preço foi aprovado automaticamente.');
+  await loadLearningOverview();await loadLearningDetails();
+ }catch(e){learningError(e);}finally{btn.disabled=false;}
+});
+$('learnRuleAdd').addEventListener('click',async()=>{
+ const text=$('learnRuleText').value,jid=$('learnRuleScope').value==='contact'?selected:null;
+ if($('learnRuleScope').value==='contact'&&!jid){learningStatus('Selecione um contato primeiro.');return;}
+ try{
+  await window.whatsapp.learnAddRule(text,jid);
+  $('learnRuleText').value='';
+  learningStatus('Regra salva como rascunho, aguardando aprovação.');
+  await loadLearningDetails();
+ }catch(e){learningError(e);}
+});
+$('learnSendSuggestion').addEventListener('click',async()=>{
+ if(!selected||!currentSuggestion)return;
+ const btn=$('learnSendSuggestion');btn.disabled=true;
+ try{
+  await window.whatsapp.learnSendSuggestion(currentSuggestion.id,selected,$('learnSuggestionText').value);
+  $('learnSuggestionResult').textContent='Mensagem aprovada e enviada ao contato.';
+  await loadLearningSuggestion();
+  await reload('conversas');
+ }catch(e){$('learnSuggestionResult').textContent=e.message;}
+ finally{btn.disabled=false;}
+});
+$('learnRejectSuggestion').addEventListener('click',async()=>{
+ if(!selected||!currentSuggestion)return;
+ try{await window.whatsapp.learnRejectSuggestion(currentSuggestion.id,selected);
+  await loadLearningSuggestion();
+ }catch(e){$('learnSuggestionResult').textContent=e.message;}
+});
 $('aiForm').addEventListener('submit',async event=>{
  event.preventDefault();
  const saveButton=$('aiSave');
@@ -220,9 +367,13 @@ $('sendFile').addEventListener('click',async()=>{
  catch(e){error(e.message);}finally{sendingFile=false;await status();}
 });
 window.whatsapp.onChange(kind=>{
+ if(kind==='learning'){
+  void loadLearningOverview().then(()=>loadLearningDetails()).catch(learningError);return;
+ }
  if(kind==='ai'){return;} // Não sobrescrever campos ainda não salvos enquanto o usuário edita.
  reload(kind).catch(e=>error(e.message));
 });
 refreshComposer();
+void loadLearningOverview().then(()=>loadLearningDetails()).catch(learningError);
 void loadAi();
 reload('conversas').catch(e=>error(e.message));
