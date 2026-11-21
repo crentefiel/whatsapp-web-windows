@@ -34,3 +34,23 @@ aside{position:relative}
 #aiContact{background:#35565a;color:#fff;font-size:12px;white-space:nowrap}
 #aiContact.approved{background:#08796a;color:#fff}
 @media(max-width:1050px){.chat-head{gap:6px;padding:12px}.chat-head button{padding:8px;font-size:11px!important}}
+
+.learning-settings{border-top:1px solid #28434a;display:flex;flex-direction:column;gap:9px}
+.learning-label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#c9d8de}
+.learning-settings select,.learning-settings textarea,.learning-examples textarea,.learning-suggestion textarea{
+ width:100%;box-sizing:border-box;padding:9px;border:1px solid #36515d;border-radius:7px;
+ background:#202c33;color:#e9edef;resize:vertical;font:inherit
+}
+.learning-settings h3{margin:10px 0 0}
+.learning-settings>button,.learning-settings .secondary-action{background:#36515d;color:#fff}
+.learning-settings p.small{margin:2px 0;line-height:1.45}
+.learning-examples,.learning-rules{display:flex;flex-direction:column;gap:8px}
+.learn-example,.learn-rule{background:#1c2b32;border:1px solid #36515d;border-radius:8px;padding:9px;font-size:12px;overflow-wrap:anywhere}
+.learn-example .small,.learn-rule .small{line-height:1.45}
+.learn-example textarea{margin-top:6px}
+.learning-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:7px}
+.learning-actions button{padding:7px 10px;font-size:12px}
+.learning-actions .secondary-action{background:#36515d;color:#fff}
+.learning-suggestion{padding:12px 16px;background:#142f36;border-top:1px solid #396c6c;display:flex;flex-direction:column;gap:7px}
+.learning-suggestion .small{margin:0}
+.learning-suggestion textarea{min-height:55px;max-height:150px}
