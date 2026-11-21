@@ -1,6 +1,6 @@
 # WhatsApp Desktop para Windows — Gráfica do Sorriso
 
-## Fase Baileys + IA opcional — versão 0.2.0 (em desenvolvimento)
+## Fase Baileys + IA opcional — versão 0.3.0 (em desenvolvimento)
 
 Aplicativo desktop independente em Electron, com **conexão WhatsApp pelo Baileys**, sem carregar o WhatsApp Web dentro de um navegador embutido. **Possui IA opcional configurável via API compatível com OpenAI, desativada por padrão**. A implementação anterior permanece no histórico Git.
 
