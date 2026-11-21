@@ -27,6 +27,8 @@ async function loadAi(){
   $('aiPrompt').value=aiConfig.systemPrompt||'';
   $('aiEnabled').checked=Boolean(aiConfig.enabled);
   $('aiAllowedCount').textContent='Contatos autorizados: '+aiConfig.allowedJids.length;
+  const stats=await window.whatsapp.aiDiagnostics();
+  $('aiHealth').textContent='Respostas enviadas: '+(stats.sent||0)+' · Falhas: '+(stats.failed||0)+' · Ignoradas por limite: '+(stats.skipped||0)+(stats.lastError?' · Último erro: '+stats.lastError:'');
   $('aiKeyStatus').textContent=aiConfig.hasKey?'Chave de API protegida e salva. Deixe o campo em branco para mantê-la.':'Nenhuma chave salva (API local pode funcionar sem chave).';
   $('aiClearKey').disabled=!aiConfig.hasKey;
   refreshAiContact();
