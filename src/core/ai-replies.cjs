@@ -95,6 +95,16 @@ class AiSettings{
   return this.public();
  }
 }
+function pricesIn(text){
+ const values=[];
+ const regex=/(?:R\\$\\s*(\\d+(?:\\.\\d{3})*(?:,\\d{1,2})?)|(\\d+(?:,\\d{1,2})?)\\s*reais?\\b)/gi;
+ for(const match of String(text||'').matchAll(regex)){
+  const value=(match[1]||match[2]).replace(/\\./g,'').replace(',','.');
+  const cents=Math.round(Number(value)*100);
+  if(Number.isFinite(cents)&&cents>=0)values.push(cents);
+ }
+ return values;
+}
 class AutoResponder{
  constructor({settings,client,store,learning=null,fetchImpl=globalThis.fetch,delayMs=1500}){
   this.settings=settings;this.client=client;this.store=store;this.learning=learning;this.fetch=fetchImpl;
@@ -281,11 +291,12 @@ class AutoResponder{
        ||this.latestIncoming.get(jid)?.id!==latest?.id)return;
     // Valor observado em uma conversa não vira preço oficial automaticamente.
     if(hasPrice(answer)){
-     const known=this.learning.context(jid,latest?.text||'').rules.some(r=>
-       hasPrice(r.content)&&r.state==='approved'&&
-       ((answer.match(/R\\$\\s*\\d+(?:[.,]\\d+)*/i)||[])[0]||'').replace(/\\s/g,'')===
-       ((r.content.match(/R\\$\\s*\\d+(?:[.,]\\d+)*/i)||[])[0]||'').replace(/\\s/g,''));
-     if(!known){this.skip('Preço não aprovado; aguardando atendimento humano');return;}
+     const amounts=pricesIn(answer);
+     const official=this.learning.context(jid,latest?.text||'').rules
+       .filter(r=>r.state==='approved').flatMap(r=>pricesIn(r.content));
+     if(!amounts.length||!amounts.every(value=>official.includes(value))){
+       this.skip('Preço não aprovado; aguardando atendimento humano');return;
+     }
     }
    }
    await this.client.sendText(jid,'🤖 '+answer,'ai');
