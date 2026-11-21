@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('whatsapp',Object.freeze({
  sendFile:(jid,kind,caption)=>call('sendFile',jid,kind,caption),
  saveMedia:id=>call('saveMedia',id),profile:jid=>call('profile',jid),
  openContactFolder:jid=>call('openContactFolder',jid),
+ aiSettings:()=>call('aiSettings'),
+ aiSave:config=>call('aiSave',config),
+ aiContact:(jid,allow)=>call('aiContact',jid,allow),
+ aiDiagnostics:()=>call('aiDiagnostics'),
  onChange:callback=>{
    if(typeof callback!=='function')return()=>{};
    const listener=(_event,kind)=>callback(kind);ipcRenderer.on('dados:alterados',listener);
