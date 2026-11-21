@@ -6,7 +6,7 @@ const {relativeMediaPath}=require('./media-files.cjs');
 const {archiveBaileysSession}=require('./session.cjs');
 class WhatsAppClient{
   constructor({dataDir,store,changed}){
-    this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;this.sessionExpired=false;this.recentMessages=new Map();
+    this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;this.sessionExpired=false;this.recentMessages=new Map();this.aiNotified=new Set();
     this.status={state:'desconectado',qr:null,lastEvent:null,lastSaved:null,lastIncoming:null,received:0,saved:0,upserts:0,upsertsNotify:0,upsertsAppend:0,upsertsOther:0,lastUpsertType:null,ignored:0,duplicates:0,errors:0,mediaErrors:0,detail:''};this.logger=null;
   }
   update(patch){Object.assign(this.status,patch);this.changed('status');}
@@ -134,7 +134,12 @@ class WhatsAppClient{
         // O Baileys às vezes entrega append e depois notify do mesmo ID.
         // A IA decide se o evento notify é novo e trata duplicatas/idade.
         if(source==='tempo_real'&&!m.fromMe&&m.type==='text'){
-          try{this.onIncoming?.(m,source);}catch(e){this.reportError('ia_evento',e);}
+          const eventKey=m.jid+'|'+m.id+'|'+m.participant;
+          if(!this.aiNotified.has(eventKey)){
+            this.aiNotified.add(eventKey);
+            while(this.aiNotified.size>1000)this.aiNotified.delete(this.aiNotified.values().next().value);
+            try{this.onIncoming?.(m,source);}catch(e){this.reportError('ia_evento',e);}
+          }
         }
         // Atualizar mídias incompletas quando um evento válido reaparece.
         if(source!=='envio'&&m.media&&m.media.size<=MEDIA_LIMIT&&(!exists||!this.store.linkedMedia(m))){
