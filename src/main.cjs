@@ -3,12 +3,13 @@ const {app,BrowserWindow,ipcMain,dialog,protocol,net,shell,Menu,clipboard,safeSt
 const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('node:url');
 const {Store}=require('./core/database.cjs');
 const {AiSettings,AutoResponder}=require('./core/ai-replies.cjs');
+const {LearningMemory}=require('./core/learning-memory.cjs');
 const {WhatsAppClient}=require('./core/wa-client.cjs');
 const {isAllowedJid}=require('./core/messages.cjs');
 const {hasSavedBaileysSession}=require('./core/session.cjs');
 const {resolveStoredMedia,contactFolder}=require('./core/media-files.cjs');
 protocol.registerSchemesAsPrivileged([{scheme:'sorriso',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
-let window=null,store=null,client=null,aiSettings=null,aiResponder=null;
+let window=null,store=null,client=null,aiSettings=null,aiResponder=null,learning=null;
 if(!app.requestSingleInstanceLock())app.quit();
 else{
  app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
@@ -26,8 +27,15 @@ async function startApp(){
  const dataDir=app.getPath('userData');store=new Store(dataDir);
  client=new WhatsAppClient({dataDir,store,changed});
  aiSettings=new AiSettings(dataDir,safeStorage);
- aiResponder=new AutoResponder({settings:aiSettings,client,store});
+ learning=new LearningMemory(store,changed);
+ aiResponder=new AutoResponder({settings:aiSettings,client,store,learning});
+ client.memory=learning;
  client.onIncoming=(m,source)=>aiResponder.handleIncoming(m,source);
+ client.onHuman=(m,source)=>{
+   if(learning.isBot(m.jid,m.id)||/^🤖\\s/.test(m.text))return;
+   learning.recordHuman(m,source);
+   aiResponder.handleHuman(m.jid);
+ };
  protocol.handle('sorriso',async request=>{
    const url=new URL(request.url);if(url.host!=='local')return new Response('Not found',{status:404});
    if(url.pathname.startsWith('/media/')){
@@ -58,13 +66,48 @@ async function startApp(){
  });
  api('whatsapp:aiDiagnostics',()=>({...aiResponder.stats}));
  api('whatsapp:aiTest',()=>aiResponder.testConnection());
+ api('whatsapp:learnStats',()=>learning.stats());
+ api('whatsapp:learnMode',async mode=>{
+   if(!['observation','suggestion','automatic'].includes(mode))throw Error('Modo inválido');
+   if(mode==='automatic'){
+     if(!aiSettings.public().enabled)throw Error('Ative a IA e salve as configurações da API antes de selecionar Automático');
+     const choice=await dialog.showMessageBox(window,{
+       type:'warning',title:'Ativar respostas automáticas',
+       message:'Ativar o modo Automático com a memória aprendida?',
+       detail:'A IA poderá enviar respostas por conta própria apenas em conversas individuais permitidas, quando houver exemplos humanos semelhantes. Valores não aprovados serão bloqueados. Você poderá voltar ao modo Observação a qualquer momento.',
+       buttons:['Cancelar','Ativar Automático'],defaultId:0,cancelId:0,noLink:true
+     });
+     if(choice.response!==1)return{canceled:true,mode:learning.mode()};
+   }
+   aiResponder.cancelPending();
+   return{canceled:false,mode:learning.setMode(mode)};
+ });
+ api('whatsapp:learnRebuild',()=>learning.rebuild());
+ api('whatsapp:learnExamples',jid=>learning.examples(jid));
+ api('whatsapp:learnExampleUpdate',(id,reply,status)=>learning.sampleUpdate(id,{reply,status}));
+ api('whatsapp:learnRules',jid=>learning.rules(jid||null));
+ api('whatsapp:learnAddRule',(text,jid)=>Number(learning.addRule(text,jid||null)));
+ api('whatsapp:learnApproveRule',(id,approve)=>learning.approveRule(id,approve));
+ api('whatsapp:learnSuggestion',jid=>learning.mode()==='suggestion'?learning.suggestion(jid):null);
+ api('whatsapp:learnRejectSuggestion',(id,jid)=>Boolean(learning.finishSuggestion(id,jid,'','rejected')));
+ api('whatsapp:learnSendSuggestion',async(id,jid,answer)=>{
+   if(learning.mode()!=='suggestion')throw Error('Ative o modo Sugestão antes de enviar');
+   if(!isAllowedJid(jid)||typeof answer!=='string'||!answer.trim()||answer.length>3000)throw Error('Resposta inválida');
+   const pending=learning.suggestion(jid);
+   if(!pending||pending.id!==id)throw Error('Sugestão não está mais disponível');
+   // Envio somente após clique explícito do usuário.
+   const sent=await client.sendText(jid,answer.trim(),'human');
+   learning.finishSuggestion(id,jid,answer.trim(),'approved');
+   changed('learning');return sent;
+ });
  api('whatsapp:copyDiagnostics',()=>{
    // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
    const {qr,...diagnostics}=client.status;
    const {enabled,allowedJids,responseScope}=aiSettings.public();
    const {sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}=aiResponder.stats;
+   const learned=learning.stats();
    clipboard.writeText(JSON.stringify({appVersion:app.getVersion(),...diagnostics,
-     ai:{enabled,responseScope,allowedContacts:allowedJids.length,sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}},null,2));
+     ai:{enabled,responseScope,allowedContacts:allowedJids.length,sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger,learningMode:learned.mode,learnedExamples:learned.examples}},null,2));
    return{copied:true};
  });
  api('whatsapp:start',()=>client.start());
