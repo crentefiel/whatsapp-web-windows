@@ -61,6 +61,19 @@ class Store {
       this.db.exec('COMMIT');return true;
     }catch(e){this.db.exec('ROLLBACK');throw e;}
   }
+  // Um placeholder/protocolo pode chegar antes do conteúdo descriptografado.
+  // Atualizar apenas se a nova versão contiver conteúdo que estava ausente.
+  upgrade(m){
+    const jid=this.resolveJid(m.jid);
+    const old=this.db.prepare('SELECT kind,body FROM messages WHERE jid=? AND id=? AND participant=?').get(jid,m.id,m.participant);
+    if(!old)return false;
+    const emptyOld=old.kind==='protocol'||(old.kind==='text'&&!old.body);
+    const hasContent=Boolean(m.text)||Boolean(m.media);
+    if(!emptyOld||!hasContent)return false;
+    const result=this.db.prepare(`UPDATE messages SET kind=?,body=?,quoted_id=COALESCE(?,quoted_id)
+      WHERE jid=? AND id=? AND participant=?`).run(m.type,m.text,m.quotedId,jid,m.id,m.participant);
+    return result.changes>0;
+  }
   saveMedia(m){this.db.prepare('INSERT OR REPLACE INTO media(id,filename,mime,kind,relative_path,size) VALUES(?,?,?,?,?,?)').run(m.id,m.filename,m.mime,m.kind,m.relativePath,m.size);}
   getMedia(id){return this.db.prepare('SELECT * FROM media WHERE id=?').get(id);}
   messageContent(key){
