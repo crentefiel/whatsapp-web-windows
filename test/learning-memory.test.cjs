@@ -177,3 +177,47 @@ test('intervenção humana impede resposta programada e torna sugestão pendente
   ai.stop();
  }finally{x.close();}
 });
+
+test('a integração Baileys observa resposta humana enviada no WhatsApp Web mas não aprende resposta do robô',async()=>{
+ const x=createCase();try{
+  const {WhatsAppClient}=require('../src/core/wa-client.cjs');
+  const t=Date.now()-2000;
+  x.store.save(m(A,'cliente-antes',false,'Vocês fazem cartão de visita?',t));
+  const client=new WhatsAppClient({dataDir:x.dir,store:x.store,changed:()=>{}});
+  client.memory=x.learning;
+  client.onHuman=(msg,source)=>x.learning.recordHuman(msg,source);
+  const sent=(id,body)=>({
+   key:{remoteJid:A,id,fromMe:true},
+   message:{conversation:body},messageTimestamp:Math.floor(Date.now()/1000)
+  });
+  await client.ingest([sent('humano-web','Fazemos sim. Qual a quantidade?')],'tempo_real',{});
+  assert.equal(x.learning.examples(A).length,1);
+  assert.equal(x.learning.examples(A)[0].source,'tempo_real');
+  x.learning.markBot(A,'robotico');
+  await client.ingest([sent('robotico','🤖 Olá, podemos ajudar!')],'envio',{});
+  assert.equal(x.learning.examples(A).length,1);
+ }finally{x.close();}
+});
+
+test('automático exige o valor EXATO de preço presente em regra aprovada, inclusive quando escrito em reais',async()=>{
+ const x=createCase();try{
+  seed(x.store);x.learning.rebuild();x.learning.setMode('automatic');
+  const settings=new AiSettings(x.dir,vault);
+  settings.update({baseUrl:'http://localhost:11434/v1',model:'modelo',responseScope:'all',enabled:true});
+  const sent=[];
+  let reply='O valor fica R$ 120,00.';
+  const ai=new AutoResponder({settings,client:{status:{state:'conectado'},sendText:async(...args)=>sent.push(args)},
+   store:x.store,learning:x.learning,delayMs:1,fetchImpl:async()=>({ok:true,
+    text:async()=>JSON.stringify({choices:[{message:{content:reply}}]})})});
+  const rule=x.learning.addRule('Valor aprovado: R$ 80,00.');
+  x.learning.approveRule(Number(rule),true);
+  ai.handleIncoming(m(A,'preco-nao-igual',false,'Qual o horário de atendimento?'),'tempo_real');
+  await wait(75);
+  assert.equal(sent.length,0,'não enviar preço diferente do preço oficial');
+  reply='O valor confirmado é 80 reais.';
+  ai.handleIncoming(m(A,'preco-correspondente',false,'Qual o horário de atendimento?'),'tempo_real');
+  await wait(75);
+  assert.equal(sent.length,1,'aceitar valor exatamente aprovado em formato equivalente');
+  ai.stop();
+ }finally{x.close();}
+});
