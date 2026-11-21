@@ -92,6 +92,7 @@ $('connect').addEventListener('click',async()=>{error('');try{await window.whats
 $('search').addEventListener('input',renderChats);
 $('messageInput').addEventListener('input',refreshComposer);
 $('refreshPhoto').addEventListener('click',async()=>{if(!selected)return;try{const url=await window.whatsapp.profile(selected);photo(selected,url);}catch(e){error(e.message);}});
+$('openContactFolder').addEventListener('click',async()=>{if(!selected)return;try{await window.whatsapp.openContactFolder(selected);}catch(e){error(e.message);}});
 $('sendForm').addEventListener('submit',async e=>{
  e.preventDefault();const value=$('messageInput').value;if(!selected||!value.trim()||sendingText)return;
  if(currentState!=='conectado'){error('Aguarde o WhatsApp reconectar para enviar.');return;}
