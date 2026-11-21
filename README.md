@@ -1,6 +1,6 @@
 # WhatsApp Desktop para Windows — Gráfica do Sorriso
 
-## Fase Baileys + IA opcional — versão 0.3.3 (em desenvolvimento)
+## Fase Baileys + IA opcional — versão 0.4.0-beta.1 (em desenvolvimento)
 
 Aplicativo desktop independente em Electron, com **conexão WhatsApp pelo Baileys**, sem carregar o WhatsApp Web dentro de um navegador embutido. **Possui IA opcional configurável via API compatível com OpenAI, desativada por padrão**. A implementação anterior permanece no histórico Git.
 
@@ -103,3 +103,37 @@ O diagnóstico podia exibir **"Último bloqueio: Mensagem antiga; sem resposta a
 Agora o aplicativo confia no evento `notify` para identificar uma mensagem nova, não descarta mensagens por diferença de minutos entre os relógios e rejeita somente eventos com mais de **24 horas no passado**. O histórico sincronizado via `append` ou `messaging-history.set` continua sem acionar respostas, e os IDs de mensagens continuam protegidos contra duplicidade.
 
 **Teste real:** instale a versão 0.3.3 preservando a pasta `userData`; confira se o WhatsApp está conectado e a IA está realmente ativada. Peça a outro contato para enviar uma mensagem NOVA e confira em Configurações → Inteligência artificial se `Entradas avaliadas`, `Agendadas`, `Chamadas à API` e `Respostas enviadas` aumentam. Testar a API isoladamente com `OK` não comprova o envio automático pelo WhatsApp. Se o relógio do Windows estiver incorreto, sincronize a data e hora do sistema também.
+
+## Fase 0.4.0-beta.1 — observação, sugestões e memória persistente (experimental)
+
+**Base funcional preservada:** a versão 0.3.3 que já passou por testes reais de QR Code, mensagens, arquivos e IA foi mantida na ramificação `stable/whatsapp-baileys-ai-0.3.3-working` (commit `28d496729417177c47a77cbcef28f292c0c4a8e2`). Esta nova fase foi feita na ramificação independente `feat/observation-learning-memory`, sem modificar a referência estável. Por enquanto não unir a nova ramificação ao aplicativo de produção.
+
+### Os três modos — ⚙ → Memória e aprendizado
+
+- **Observação (padrão da nova fase):** nunca envia mensagens em nome da IA nem faz consultas à API para aprender. O Baileys captura as mensagens individuais enviadas e recebidas, incluindo respostas humanas que chegam como mensagens `fromMe` do WhatsApp Web/celular ou digitadas neste aplicativo. O histórico está em SQLite, com exemplos de pergunta do cliente e resposta humana vinculados ao contato.
+- **Sugestão:** diante de uma nova mensagem individual, consulta a API compatível com OpenAI com contexto desse cliente, regras aprovadas e exemplos relevantes. Mostra rascunho editável. Só envia após **Aprovar e enviar**; também permite rejeitar. O envio aprovado vira um exemplo humano para aquele cliente.
+- **Automático:** exige ativação explícita e confirmação. Só considera conversas individuais permitidas e novas notificações `notify`, com histórico/contexto. Requer um exemplo humano suficientemente semelhante para responder. Respostas citando preços não aprovados são bloqueadas; se não houver informação segura, deixa a conversa para uma pessoa. Ao identificar que o proprietário respondeu, interrompe sugestões pendentes e pausa aquele atendimento por dez minutos.
+
+Grupos, comunidades, canais, status e mensagens antigas sincronizadas não disparam respostas. O sistema **não treina pesos do modelo**, mas utiliza memória, exemplos e regras persistidos no computador. Os arquivos e credenciais do WhatsApp não são migrados nem apagados por essa mudança.
+
+### Memória de atendimentos
+
+O banco `conversas.sqlite` recebe tabelas adicionais para modo de operação, exemplos pergunta→resposta, sugestões, regras rascunho/aprovadas/rejeitadas, mensagens da IA e pausas humanas. O histórico de mensagens já recebido pelo Baileys continua na tabela original `messages`: a visualização pode limitar quantas mensagens carrega, mas a importação de exemplos percorre o histórico local existente, e não apenas as últimas 200 linhas da interface.
+
+Clique em **Importar exemplos do histórico local** para relacionar respostas humanas de conversas armazenadas. O programa não envia o histórico à API nesse processo; somente transforma pares já guardados em exemplos editáveis e revisáveis. Cada exemplo mantém o contato e a origem. Na conversa selecionada, aprove/corrija ou rejeite exemplos. Cadastre regras novas como **rascunho** e aprove-as individualmente antes de tratá-las como políticas oficiais. Preços observados nunca se tornam oficiais automaticamente.
+
+As solicitações ao provedor de IA em Sugestão/Automático podem incluir até 12 mensagens textuais recentes do cliente selecionado, exemplos relevantes desse mesmo cliente e regras aprovadas; dados brutos de outros clientes não são misturados. Uma agregação local de estilo geral pode orientar o tamanho e a frequência de saudações, sem enviar textos de outras conversas. Clientes não ficam automaticamente informados sobre processamento externo; forneça os avisos de privacidade aplicáveis.
+
+**Atenção:** anexos e banco SQLite continuam locais e sem criptografia de disco adicional nesta versão; use controles e backup adequados. A sincronização de histórico antigo depende do que o WhatsApp disponibiliza ao dispositivo vinculado. Não há garantia de recuperar mensagens que o Baileys nunca entregou.
+
+### Validação antes de usar em produção
+
+1. Fazer cópia da pasta `userData`, incluindo `baileys_auth`, `conversas.sqlite`, `media` e `ia-config.json`. Instalar a beta preservando esses dados. Confirmar QR Code, reconexão, texto e anexos.
+2. Confirmar **Observação** como modo inicial. Enviar mensagens de um telefone autorizado e responder manualmente pelo WhatsApp Web. Verificar que não houve resposta automática e que o exemplo apareceu na memória do contato correto.
+3. Importar o histórico local, revisar os exemplos e aprovar uma regra de teste. Verificar que nenhuma regra de preço se tornou aprovada sem ação explícita.
+4. Entrar no modo **Sugestão**, enviar uma mensagem nova e confirmar que o texto sugerido aparece, mas não sai do WhatsApp enquanto não clicar **Aprovar e enviar**. Editar, aprovar e conferir entrega no destino.
+5. Confirmar que uma resposta humana no Web/celular interrompe a automação e que grupos/canais/status continuam excluídos.
+6. Apenas com clientes de teste e exemplos aprovados, selecionar **Automático** e confirmar o diálogo. Avaliar limites, informações comerciais, histórico e diagnóstico sem expor conversas de clientes.
+7. Se algo falhar, voltar ao modo **Observação** ou à versão estável 0.3.3, conservando a cópia de segurança. Nenhum teste automatizado substitui o teste real no seu Windows.
+
+**Não habilitar Automático em contatos de clientes reais antes de homologar a beta.**
