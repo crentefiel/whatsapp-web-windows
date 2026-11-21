@@ -32,7 +32,8 @@ async function startApp(){
  client.memory=learning;
  client.onIncoming=(m,source)=>aiResponder.handleIncoming(m,source);
  client.onHuman=(m,source)=>{
-   if(learning.isBot(m.jid,m.id)||/^🤖\\s/.test(m.text))return;
+   if(source==='historico'||(Number.isFinite(m.timestamp)&&Date.now()-m.timestamp>60*60*1000))return;
+   if(learning.isBot(m.jid,m.id)||/^🤖\s/.test(m.text))return;
    learning.recordHuman(m,source);
    aiResponder.handleHuman(m.jid);
  };
