@@ -221,3 +221,16 @@ test('automático exige o valor EXATO de preço presente em regra aprovada, incl
   ai.stop();
  }finally{x.close();}
 });
+
+test('enviar sugestão aprovada não falha quando o próprio envio ativa pausa humana',()=>{
+ const x=createCase();try{
+  const id=x.learning.saveSuggestion(A,'id-cliente','Sugestão original');
+  x.learning.beginSuggestion(id,A);
+  x.learning.pauseForHuman(A);
+  assert.equal(x.learning.finishSuggestion(id,A,'Resposta revisada','approved').id,id);
+  assert.equal(x.learning.suggestion(A),null);
+  const row=x.store.db.prepare('SELECT status,answer FROM learning_suggestions WHERE id=?').get(id);
+  assert.equal(row.status,'approved');
+  assert.equal(row.answer,'Resposta revisada');
+ }finally{x.close();}
+});
