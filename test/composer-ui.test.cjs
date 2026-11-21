@@ -17,7 +17,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 test('campo de texto aceita digitação offline e envio/anexos liberam após conectar',async()=>{
   const elements=new Map();
   const get=id=>{if(!elements.has(id))elements.set(id,mockElement(id));return elements.get(id);};
-  const sent=[],files=[],opened=[];let state='desconectado',onChange=null;
+  const sent=[],files=[],opened=[],repairs=[];let state='desconectado',onChange=null;
   const document={
     getElementById:get,
     createElement:()=>mockElement(),
@@ -30,12 +30,17 @@ test('campo de texto aceita digitação offline e envio/anexos liberam após con
     sendText:async(jid,message)=>{sent.push({jid,message});},
     sendFile:async(jid,kind)=>{files.push({jid,kind});},
     openContactFolder:async jid=>{opened.push(jid);},
+    repair:async()=>{repairs.push(true);state='aguardando_qr';return{archived:true};},
     onChange:callback=>{onChange=callback;}
   }};
   const code=fs.readFileSync(path.join(__dirname,'../src/ui.js'),'utf8');
   vm.runInNewContext(code,{document,window,Date,console});
   await tick();
   assert.equal(get('messageInput').disabled,true,'sem contato não se pode escrever');
+  assert.equal(get('repair').hidden,false,'usuário desconectado pode solicitar novo QR');
+  await get('repair').handlers.click();
+  assert.equal(repairs.length,1,'ação de reparo deve chamar API após confirmação nativa');
+
   const contact=get('conversations').children[0];
   assert.ok(contact,'contato individual deve aparecer');
   contact.handlers.click();
@@ -50,6 +55,7 @@ test('campo de texto aceita digitação offline e envio/anexos liberam após con
   await tick();
   assert.equal(get('sendButton').disabled,false,'pode enviar texto quando conectado');
   assert.equal(get('sendFile').disabled,false,'pode anexar quando conectado');
+  assert.equal(get('repair').hidden,true,'não oferecer novo QR quando conectado');
   await get('sendForm').handlers.submit({preventDefault(){}});
   assert.equal(sent.length,1);
   assert.equal(sent[0].message,'Olá depois de reconectar');
