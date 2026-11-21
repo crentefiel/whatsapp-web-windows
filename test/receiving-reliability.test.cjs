@@ -127,3 +127,16 @@ test('arquivo enviado fica salvo localmente e não é baixado outra vez pela red
  assert.deepEqual(await fs.readFile(resolveStoredMedia(folder,media.relative_path)),bytes);
  assert.equal(client.status.mediaErrors,0);
 }));
+
+test('integração: só mensagem nova individual chama o gatilho de IA',async()=>withClient(async({store,client})=>{
+ const calls=[];
+ client.onIncoming=(m,source)=>calls.push({id:m.id,jid:m.jid,source});
+ const a=text('novo-ia',PN,'Bom dia!');
+ await client.ingest([a],'tempo_real',{});
+ await client.ingest([a],'tempo_real',{}); // duplicata não pode disparar IA de novo
+ await client.ingest([text('hist-ia',PN,'Mensagem antiga')],'historico',{});
+ await client.ingest([text('grupo-ia','120363777@g.us','Grupo')],'tempo_real',{});
+ await client.ingest([{...text('eu-ia'),key:{remoteJid:PN,id:'eu-ia',fromMe:true}}],'tempo_real',{});
+ assert.deepEqual(calls,[{id:'novo-ia',jid:PN,source:'tempo_real'}]);
+ assert.equal(store.messages(PN).length,3);
+}));
