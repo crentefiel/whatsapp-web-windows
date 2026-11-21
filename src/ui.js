@@ -2,6 +2,7 @@
 const $=id=>document.getElementById(id);
 let selected=null,chats=[],reloading=false,pendingStatus=false,pendingConversations=false;
 let currentState='desconectado',sendingText=false,sendingFile=false;
+let aiConfig={enabled:false,allowedJids:[],hasKey:false};
 function refreshComposer(){
  const hasContact=Boolean(selected),connected=currentState==='conectado';
  $('messageInput').disabled=!hasContact;
@@ -10,10 +11,31 @@ function refreshComposer(){
  $('sendFile').disabled=!hasContact||!connected||sendingFile;
  $('composerHint').textContent=!hasContact?'Escolha um contato para escrever.':connected?'':'Sem conexão: você pode escrever, e o envio será liberado quando o WhatsApp reconectar.';
 }
+function refreshAiContact(){
+ const btn=$('aiContact');
+ btn.hidden=!selected;
+ const approved=!!selected&&aiConfig.allowedJids.includes(selected);
+ btn.textContent=approved?'IA autorizada':'Autorizar IA';
+ btn.className=approved?'approved':'';
+ btn.title=approved?'Clique para impedir a IA de responder este contato':'Clique para permitir respostas automáticas a este contato';
+}
+async function loadAi(){
+ try{
+  aiConfig=await window.whatsapp.aiSettings();
+  $('aiBaseUrl').value=aiConfig.baseUrl||'https://api.openai.com/v1';
+  $('aiModel').value=aiConfig.model||'';
+  $('aiPrompt').value=aiConfig.systemPrompt||'';
+  $('aiEnabled').checked=Boolean(aiConfig.enabled);
+  $('aiAllowedCount').textContent='Contatos autorizados: '+aiConfig.allowedJids.length;
+  $('aiKeyStatus').textContent=aiConfig.hasKey?'Chave de API protegida e salva. Deixe o campo em branco para mantê-la.':'Nenhuma chave salva (API local pode funcionar sem chave).';
+  $('aiClearKey').disabled=!aiConfig.hasKey;
+  refreshAiContact();
+ }catch(e){$('aiResult').textContent='Não foi possível carregar a IA: '+e.message;}
+}
 function toggleSettings(open){
  $('settingsPanel').hidden=!open;
  $('openSettings').setAttribute('aria-expanded',String(open));
- if(open){$('closeSettings').focus();}else{$('openSettings').focus();}
+ if(open){$('closeSettings').focus();void loadAi();}else{$('openSettings').focus();}
 }
 function error(message){$('error').textContent=String(message||'').slice(0,220);}
 function readable(jid){return String(jid||'').split('@')[0];}
@@ -53,7 +75,7 @@ function renderChats(){
 async function conversations(){try{chats=await window.whatsapp.conversations();renderChats();}catch(e){error(e.message);}}
 async function choose(c){
  selected=c.jid;$('contactTitle').textContent=c.name||readable(c.jid);$('contactJid').textContent=c.jid;
- $('refreshPhoto').hidden=false;$('openContactFolder').hidden=false;photo(c.jid,c.photo);renderChats();refreshComposer();await messages();await status();
+ $('refreshPhoto').hidden=false;$('openContactFolder').hidden=false;photo(c.jid,c.photo);renderChats();refreshComposer();refreshAiContact();await messages();await status();
 }
 function mediaElement(m){
  if(!m.media_id)return null;
@@ -109,6 +131,38 @@ $('copyDiagnostics').addEventListener('click',async()=>{
  try{const result=await window.whatsapp.copyDiagnostics();if(result?.copied)error('Diagnóstico copiado. Cole no chat para análise.');}
  catch(e){error(e.message);}
 });
+$('aiForm').addEventListener('submit',async event=>{
+ event.preventDefault();$('aiResult').textContent='Salvando...';
+ const config={
+  baseUrl:$('aiBaseUrl').value.trim(),model:$('aiModel').value.trim(),
+  systemPrompt:$('aiPrompt').value,enabled:Boolean($('aiEnabled').checked),
+  apiKey:$('aiApiKey').value
+ };
+ try{
+  aiConfig=await window.whatsapp.aiSave(config);
+  $('aiApiKey').value='';
+  $('aiResult').textContent=aiConfig.enabled?'IA ativada somente nos contatos autorizados.':'Configurações salvas. IA desativada.';
+  await loadAi();
+ }catch(e){$('aiResult').textContent=e.message;}
+});
+$('aiClearKey').addEventListener('click',async()=>{
+ try{
+  aiConfig=await window.whatsapp.aiSave({clearKey:true,enabled:false});
+  $('aiApiKey').value='';
+  $('aiResult').textContent='Chave removida. Respostas automáticas desativadas.';
+  await loadAi();
+ }catch(e){$('aiResult').textContent=e.message;}
+});
+$('aiContact').addEventListener('click',async()=>{
+ if(!selected)return;
+ const approved=aiConfig.allowedJids.includes(selected);
+ try{
+  aiConfig=await window.whatsapp.aiContact(selected,!approved);
+  refreshAiContact();
+  $('aiAllowedCount').textContent='Contatos autorizados: '+aiConfig.allowedJids.length;
+  $('aiResult').textContent=approved?'Contato retirado da IA.':'Contato autorizado. Para responder, ative a IA nas Configurações.';
+ }catch(e){error(e.message);}
+});
 $('search').addEventListener('input',renderChats);
 $('messageInput').addEventListener('input',refreshComposer);
 $('refreshPhoto').addEventListener('click',async()=>{if(!selected)return;try{const url=await window.whatsapp.profile(selected);photo(selected,url);}catch(e){error(e.message);}});
@@ -127,6 +181,10 @@ $('sendFile').addEventListener('click',async()=>{
  try{await window.whatsapp.sendFile(selected,$('attachmentType').value,'');await reload('conversas');}
  catch(e){error(e.message);}finally{sendingFile=false;await status();}
 });
-window.whatsapp.onChange(kind=>{reload(kind).catch(e=>error(e.message));});
+window.whatsapp.onChange(kind=>{
+ if(kind==='ai'){void loadAi();return;}
+ reload(kind).catch(e=>error(e.message));
+});
 refreshComposer();
+void loadAi();
 reload('conversas').catch(e=>error(e.message));
