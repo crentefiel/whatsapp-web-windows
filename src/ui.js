@@ -29,7 +29,7 @@ async function status(){
    $('repair').disabled=Boolean(s.state==='conectando');
    $('qrcode').hidden=!s.qr;if(s.qr)$('qr').src=s.qr;
    $('detail').textContent=s.detail||'';
-   $('health').textContent='Mensagens salvas: '+(s.received||0)+' · Erros: '+(s.errors||0)+' · Último evento: '+(s.lastEvent?dateString(s.lastEvent):'nenhum')+' · Última gravação: '+(s.lastSaved?dateString(s.lastSaved):'nenhuma');
+   $('health').textContent='Eventos Baileys: '+(s.upserts||0)+' · Mensagens recebidas: '+(s.received||0)+' · Salvas: '+(s.saved||0)+' · Ignoradas: '+(s.ignored||0)+' · Duplicadas: '+(s.duplicates||0)+' · Falhas de mídia: '+(s.mediaErrors||0)+' · Erros: '+(s.errors||0)+' · Última entrada: '+(s.lastIncoming?dateString(s.lastIncoming):'nenhuma')+' · Último evento: '+(s.lastEvent?dateString(s.lastEvent):'nenhum');
    currentState=s.state;
    refreshComposer();
  }catch(e){error(e.message);}
@@ -104,6 +104,10 @@ document.addEventListener('keydown',event=>{
 $('connect').addEventListener('click',async()=>{error('');try{await window.whatsapp.start();await status();}catch(e){error(e.message);}});
 $('repair').addEventListener('click',async()=>{
  error('');try{const result=await window.whatsapp.repair();if(!result?.canceled)await status();}catch(e){error(e.message);}
+});
+$('copyDiagnostics').addEventListener('click',async()=>{
+ try{const result=await window.whatsapp.copyDiagnostics();if(result?.copied)error('Diagnóstico copiado. Cole no chat para análise.');}
+ catch(e){error(e.message);}
 });
 $('search').addEventListener('input',renderChats);
 $('messageInput').addEventListener('input',refreshComposer);
