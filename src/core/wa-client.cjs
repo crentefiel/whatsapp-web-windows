@@ -117,6 +117,9 @@ class WhatsAppClient{
         const exists=this.store.has(m);
         if(!exists){
           if(this.store.save(m)){
+            if(m.fromMe&&m.type==='text'){
+              try{this.onHuman?.(m,source);}catch(e){this.reportError('observacao_humana',e);}
+            }
             this.status.saved++;anySaved=true;
             if(!m.fromMe){
               this.status.received++;
@@ -177,11 +180,12 @@ class WhatsAppClient{
       }
     }
   }
-  async sendText(jid,text){
+  async sendText(jid,text,origin='human'){
     if(!isAllowedJid(jid))throw Error('Identificador inválido');
     if(typeof text!=='string'||!text.trim()||text.length>65536)throw Error('Mensagem vazia ou muito longa');
     if(!this.socket||this.status.state!=='conectado')throw Error('WhatsApp não conectado');
     const sent=await this.socket.sendMessage(jid,{text:text.trim()});
+    if(origin==='ai'&&sent?.key?.id)this.memory?.markBot(jid,sent.key.id);
     await this.ingest([sent],'envio',this.socket);
     return{id:sent?.key?.id||''};
   }
