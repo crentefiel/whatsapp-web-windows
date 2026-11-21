@@ -128,6 +128,17 @@ class LearningMemory{
   const result=this.db.prepare('UPDATE learning_rules SET state=? WHERE id=?').run(approve?'approved':'rejected',id);
   if(result.changes)this.changed('learning');return result.changes>0;
  }
+ // Agrega somente características de escrita, não compartilha falas de outro cliente.
+ globalStyle(){
+  const s=this.db.prepare(`SELECT COUNT(*) AS n,ROUND(AVG(LENGTH(reply))) AS mean_length,
+   SUM(CASE WHEN lower(reply) LIKE 'bom dia%' THEN 1 ELSE 0 END) AS good_morning,
+   SUM(CASE WHEN lower(reply) LIKE 'olá%' OR lower(reply) LIKE 'oi%' THEN 1 ELSE 0 END) AS greeting
+   FROM learning_examples WHERE status IN('observed','approved')`).get();
+  if(!s||s.n<5)return '';
+  return 'O atendente humano costuma responder com cerca de '+s.mean_length+
+    ' caracteres por mensagem. Em '+(s.greeting+s.good_morning)+' de '+s.n+
+    ' exemplos, começou com uma saudação. Imite a concisão e o tom cordial sem compartilhar fatos de outros clientes.';
+ }
  context(jid,question){
   jid=this.jid(jid);
   // Nunca usar conversas de outros clientes como exemplos brutos.
@@ -136,7 +147,7 @@ class LearningMemory{
   const related=samples.map(x=>({...x,score:similarity(x.question,question)}))
    .filter(x=>x.score>.10).sort((a,b)=>b.score-a.score).slice(0,4);
   const approvedRules=this.rules(jid).filter(x=>x.state==='approved');
-  return{examples:related,rules:approvedRules,score:related[0]?.score||0};
+  return{examples:related,rules:approvedRules,globalStyle:this.globalStyle(),score:related[0]?.score||0};
  }
  canAuto(jid,question){
   const evidence=this.context(jid,question);
