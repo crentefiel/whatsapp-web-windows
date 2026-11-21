@@ -1,20 +1,21 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,dialog,protocol,net,shell,Menu,clipboard}=require('electron');
+const {app,BrowserWindow,ipcMain,dialog,protocol,net,shell,Menu,clipboard,safeStorage}=require('electron');
 const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('node:url');
 const {Store}=require('./core/database.cjs');
+const {AiSettings,AutoResponder}=require('./core/ai-replies.cjs');
 const {WhatsAppClient}=require('./core/wa-client.cjs');
 const {isAllowedJid}=require('./core/messages.cjs');
 const {hasSavedBaileysSession}=require('./core/session.cjs');
 const {resolveStoredMedia,contactFolder}=require('./core/media-files.cjs');
 protocol.registerSchemesAsPrivileged([{scheme:'sorriso',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
-let window=null,store=null,client=null;
+let window=null,store=null,client=null,aiSettings=null,aiResponder=null;
 if(!app.requestSingleInstanceLock())app.quit();
 else{
  app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
  app.whenReady().then(startApp).catch(e=>{console.error(e);dialog.showErrorBox('Erro ao iniciar',e.message);app.quit();});
 }
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{client?.stop();store?.close();});
+app.on('before-quit',()=>{aiResponder?.stop();client?.stop();store?.close();});
 function changed(kind){if(window&&!window.isDestroyed())window.webContents.send('dados:alterados',kind);}
 function ownRenderer(event){
  if(!window||event.sender!==window.webContents||!event.senderFrame||event.senderFrame.url!=='sorriso://local/index.html')throw Error('Origem não autorizada');
@@ -24,6 +25,9 @@ function mediaPath(media){return media?resolveStoredMedia(app.getPath('userData'
 async function startApp(){
  const dataDir=app.getPath('userData');store=new Store(dataDir);
  client=new WhatsAppClient({dataDir,store,changed});
+ aiSettings=new AiSettings(dataDir,safeStorage);
+ aiResponder=new AutoResponder({settings:aiSettings,client,store});
+ client.onIncoming=(m,source)=>aiResponder.handleIncoming(m,source);
  protocol.handle('sorriso',async request=>{
    const url=new URL(request.url);if(url.host!=='local')return new Response('Not found',{status:404});
    if(url.pathname.startsWith('/media/')){
@@ -38,6 +42,21 @@ async function startApp(){
    return net.fetch(pathToFileURL(path.join(__dirname,allowed[url.pathname])).toString());
  });
  api('whatsapp:status',()=>({...client.status}));
+ api('whatsapp:aiSettings',()=>aiSettings.public());
+ api('whatsapp:aiSave',config=>{
+   const updated=aiSettings.update(config);
+   changed('ai');return updated;
+ });
+ api('whatsapp:aiContact',(jid,allow)=>{
+   if(!isAllowedJid(jid)||typeof allow!=='boolean')throw Error('Contato inválido');
+   const config=aiSettings.public();
+   const normalized=store.resolveJid(jid);
+   const others=config.allowedJids.filter(x=>store.resolveJid(x)!==normalized);
+   if(allow)others.push(normalized);
+   const updated=aiSettings.update({allowedJids:others,enabled:config.enabled&&others.length>0});
+   changed('ai');return updated;
+ });
+ api('whatsapp:aiDiagnostics',()=>({...aiResponder.stats}));
  api('whatsapp:copyDiagnostics',()=>{
    // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
    const {qr,...diagnostics}=client.status;
