@@ -235,3 +235,47 @@ test('modo todos responde mensagem nova de contato privado sem autorização ind
   ai.stop();
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('mensagens notify recentes com relógio 7 minutos adiantado ou atrasado recebem resposta',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sorriso-ai-relogio-'));
+ try{
+  const settings=new AiSettings(dir,fakeVault);
+  settings.update({baseUrl:'http://127.0.0.1:31415/v1',model:'auto',responseScope:'all',enabled:true});
+  const calls=[],sent=[];
+  const ai=new AutoResponder({settings,client:{
+   status:{state:'conectado'},sendText:async(jid,body)=>sent.push({jid,body})
+  },store:{resolveJid:jid=>jid,messages:()=>[{kind:'text',body:'Oi',from_me:0}]},
+   delayMs:1,fetchImpl:async(url,opts)=>{
+    calls.push(url);
+    return{ok:true,text:async()=>JSON.stringify({choices:[{message:{content:'Resposta aprovada'}}]})};
+   }
+  });
+  const now=Date.now();
+  ai.handleIncoming({...incoming(JID),id:'relogio-adiantado',timestamp:now+7*60*1000},'tempo_real');
+  ai.handleIncoming({...incoming(SECOND),id:'relogio-atrasado',timestamp:now-7*60*1000},'tempo_real');
+  await new Promise(resolve=>setTimeout(resolve,100));
+  assert.equal(ai.stats.scheduled,2,'ambas mensagens notify recentes devem disparar');
+  assert.equal(calls.length,2);
+  assert.equal(sent.length,2);
+  assert.deepEqual(sent.map(m=>m.jid).sort(),[JID,SECOND].sort());
+  assert.equal(ai.stats.lastSkip,'');
+  ai.stop();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('notify muito antigo é bloqueado, append e histórico não disparam respostas',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sorriso-ai-historico-'));
+ try{
+  const settings=new AiSettings(dir,fakeVault);
+  settings.update({baseUrl:'http://127.0.0.1:31415/v1',model:'auto',responseScope:'all',enabled:true});
+  const ai=new AutoResponder({settings,client:{status:{state:'conectado'}},
+   store:{resolveJid:jid=>jid,messages:()=>[]}});
+  ai.handleIncoming({...incoming(JID),id:'muito-antiga',timestamp:Date.now()-26*60*60*1000},'tempo_real');
+  assert.equal(ai.stats.scheduled,0);
+  assert.match(ai.stats.lastSkip,/mais de 24 horas/);
+  ai.handleIncoming({...incoming(JID),id:'historica',timestamp:Date.now()},'historico');
+  ai.handleIncoming({...incoming(JID),id:'append',timestamp:Date.now()},'sincronizacao');
+  assert.equal(ai.stats.scheduled,0);
+  ai.stop();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
