@@ -4,6 +4,7 @@ const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('n
 const {Store}=require('./core/database.cjs');
 const {WhatsAppClient}=require('./core/wa-client.cjs');
 const {isAllowedJid}=require('./core/messages.cjs');
+const {hasSavedBaileysSession}=require('./core/session.cjs');
 const {resolveStoredMedia}=require('./core/media-files.cjs');
 protocol.registerSchemesAsPrivileged([{scheme:'sorriso',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 let window=null,store=null,client=null;
@@ -66,5 +67,12 @@ async function startApp(){
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  window.webContents.on('will-navigate',(event,url)=>{if(url!=='sorriso://local/index.html')event.preventDefault();});
  await window.loadURL('sorriso://local/index.html');
- // O usuário inicia a conexão pelo botão; não reutilizamos credenciais antigas.
+ // Na reabertura, retomar a sessão Baileys já autorizada, sem novo QR.
+ // Se for a primeira instalação, o pareamento continua manual pelo botão.
+ if(hasSavedBaileysSession(dataDir)){
+   void client.start().catch(err=>{
+     console.error('Falha ao retomar sessão Baileys:',err.message);
+     client.reportError('retomar_sessao',err);
+   });
+ }
 }
