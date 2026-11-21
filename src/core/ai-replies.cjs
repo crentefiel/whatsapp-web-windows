@@ -91,7 +91,7 @@ class AutoResponder{
  constructor({settings,client,store,fetchImpl=globalThis.fetch,delayMs=1500}){
   this.settings=settings;this.client=client;this.store=store;this.fetch=fetchImpl;
   this.delayMs=delayMs;this.pending=new Map();this.running=new Set();
-  this.lastSent=new Map();this.hourly=new Map();this.active=true;
+  this.lastSent=new Map();this.hourly=new Map();this.seenIncoming=new Map();this.active=true;
   this.stats={sent:0,failed:0,skipped:0,observed:0,scheduled:0,apiCalls:0,lastTrigger:null,lastError:'',lastSkip:''};
  }
  allowed(jid){
@@ -107,9 +107,20 @@ class AutoResponder{
   if(m.fromMe||m.type!=='text'||!m.text?.trim()||!isAllowedJid(m.jid)){
    this.skip('Mensagem não elegível');return;
   }
-  if(!this.settings.public().enabled){this.skip('IA desativada');return;}
-  if(!this.allowed(m.jid)){this.skip('Contato sem autorização');return;}
   const jid=this.store.resolveJid?.(m.jid)||m.jid;
+  if(Number.isFinite(m.timestamp)&&Math.abs(Date.now()-m.timestamp)>5*60*1000){
+   this.skip('Mensagem antiga; sem resposta automática');return;
+  }
+  // O mesmo texto pode ser entregue em append e depois notify.
+  // Responder uma única vez por ID, mesmo se já foi gravado no SQLite.
+  if(m.id){
+   const key=jid+'|'+m.id;
+   if(this.seenIncoming.has(key)){this.skip('Evento repetido');return;}
+   this.seenIncoming.set(key,Date.now());
+   while(this.seenIncoming.size>1000)this.seenIncoming.delete(this.seenIncoming.keys().next().value);
+  }
+  if(!this.settings.public().enabled){this.skip('IA desativada');return;}
+  if(!this.allowed(jid)){this.skip('Contato sem autorização');return;}
   // Agrupa mensagens próximas e evita respostas para cada fragmento.
   if(this.pending.has(jid))clearTimeout(this.pending.get(jid));
   const t=setTimeout(()=>{
