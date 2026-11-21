@@ -49,6 +49,14 @@ async function startApp(){
    if(pick.canceled||!pick.filePaths.length)return{canceled:true};
    return client.sendAttachment(jid,pick.filePaths[0],kind,String(caption||''));
  });
+ api('whatsapp:openContactFolder',async jid=>{
+   if(!isAllowedJid(jid))throw Error('Contato inválido');
+   const folder=path.join(dataDir,'media','contatos',contactFolder(jid));
+   fs.mkdirSync(folder,{recursive:true});
+   const openError=await shell.openPath(folder);
+   if(openError)throw Error('Não foi possível abrir a pasta: '+openError);
+   return{opened:true};
+ });
  api('whatsapp:saveMedia',async id=>{
    if(typeof id!=='string'||!/^[0-9a-f-]{36}$/.test(id))throw Error('Arquivo inválido');
    const media=store.getMedia(id),source=mediaPath(media);if(!source||!fs.existsSync(source))throw Error('Arquivo não encontrado no computador');
