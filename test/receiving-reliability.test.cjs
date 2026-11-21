@@ -94,3 +94,18 @@ test('conteúdo simples persiste para getMessage e recuperação sem cache em me
  assert.deepEqual(client.getMessage({remoteJid:PN,id:'persistida'}),{conversation:'preciso do arquivo'});
  assert.equal(client.getMessage({remoteJid:'120363000000000@g.us',id:'qualquer'}),undefined);
 }));
+
+test('placeholder inicial não impede o conteúdo real recebido depois',async()=>withClient(async({store,client})=>{
+ const placeholder={key:{remoteJid:PN,id:'aguardando',fromMe:false},
+   message:{protocolMessage:{type:1}},messageTimestamp:1795000000};
+ await client.ingest([placeholder],'tempo_real',{});
+ assert.equal(store.messages(PN)[0].kind,'protocol');
+ await client.ingest([text('aguardando',PN,'agora o texto chegou')],'atualizacao',{});
+ const result=store.messages(PN);
+ assert.equal(result.length,1);
+ assert.equal(result[0].body,'agora o texto chegou');
+ assert.equal(result[0].kind,'text');
+ // Reenvio de protocolo obsoleto não pode apagar conteúdo válido.
+ await client.ingest([placeholder],'tempo_real',{});
+ assert.equal(store.messages(PN)[0].body,'agora o texto chegou');
+}));
