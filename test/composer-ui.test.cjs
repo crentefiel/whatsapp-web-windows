@@ -9,7 +9,7 @@ function mockElement(id=''){
     addEventListener(kind,fn){this.handlers[kind]=fn;},
     replaceChildren(...children){this.children=children;},
     append(...children){this.children.push(...children);},
-    setAttribute(){},
+    setAttribute(name,value){this[name]=value;},focus(){this.focused=true;},
   };
 }
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
@@ -18,8 +18,11 @@ test('campo de texto aceita digitação offline e envio/anexos liberam após con
   const elements=new Map();
   const get=id=>{if(!elements.has(id))elements.set(id,mockElement(id));return elements.get(id);};
   const sent=[],files=[],opened=[],repairs=[];let state='desconectado',onChange=null;
+  const keys={};
+  get('settingsPanel').hidden=true;
   const document={
     getElementById:get,
+    addEventListener:(kind,handler)=>{keys[kind]=handler;},
     createElement:()=>mockElement(),
     createDocumentFragment:()=>mockElement()
   };
@@ -37,9 +40,21 @@ test('campo de texto aceita digitação offline e envio/anexos liberam após con
   vm.runInNewContext(code,{document,window,Date,console});
   await tick();
   assert.equal(get('messageInput').disabled,true,'sem contato não se pode escrever');
+  assert.equal(get('settingsPanel').hidden,true,'configurações devem iniciar fechadas');
+  await get('openSettings').handlers.click();
+  assert.equal(get('settingsPanel').hidden,false,'engrenagem deve abrir as configurações');
+  assert.equal(get('openSettings')['aria-expanded'],'true');
+  keys.keydown({key:'Escape'});
+  assert.equal(get('settingsPanel').hidden,true,'Escape deve fechar as configurações');
+  await get('openSettings').handlers.click();
+  await get('closeSettings').handlers.click();
+  assert.equal(get('settingsPanel').hidden,true,'botão fechar deve funcionar');
+  await get('openSettings').handlers.click();
+  assert.equal(get('settingsPanel').hidden,false,'ao reabrir, configurações continuam disponíveis');
   assert.equal(get('repair').hidden,false,'usuário desconectado pode solicitar novo QR');
   await get('repair').handlers.click();
   assert.equal(repairs.length,1,'ação de reparo deve chamar API após confirmação nativa');
+  assert.match(get('stateBrief').textContent,/QR em Configurações/);
 
   const contact=get('conversations').children[0];
   assert.ok(contact,'contato individual deve aparecer');
@@ -56,6 +71,7 @@ test('campo de texto aceita digitação offline e envio/anexos liberam após con
   assert.equal(get('sendButton').disabled,false,'pode enviar texto quando conectado');
   assert.equal(get('sendFile').disabled,false,'pode anexar quando conectado');
   assert.equal(get('repair').hidden,true,'não oferecer novo QR quando conectado');
+  assert.equal(get('stateBrief').textContent,'Conectado');
   await get('sendForm').handlers.submit({preventDefault(){}});
   assert.equal(sent.length,1);
   assert.equal(sent[0].message,'Olá depois de reconectar');
