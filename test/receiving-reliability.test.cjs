@@ -140,3 +140,16 @@ test('integração: só mensagem nova individual chama o gatilho de IA',async()=
  assert.deepEqual(calls,[{id:'novo-ia',jid:PN,source:'tempo_real'}]);
  assert.equal(store.messages(PN).length,3);
 }));
+
+test('IA recebe notify mesmo após mensagem igual já ter sido gravada em append, sem repetição',async()=>withClient(async({store,client})=>{
+ const events=[];
+ client.onIncoming=(m,source)=>events.push({id:m.id,source});
+ const incoming=text('append-depois-notify',PN,'Mensagem nova');
+ await client.ingest([incoming],'sincronizacao',{});
+ assert.equal(store.messages(PN).length,1);
+ assert.equal(events.length,0);
+ await client.ingest([incoming],'tempo_real',{});
+ await client.ingest([incoming],'tempo_real',{});
+ assert.deepEqual(events,[{id:'append-depois-notify',source:'tempo_real'}]);
+ assert.equal(store.messages(PN).length,1);
+}));
