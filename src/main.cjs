@@ -57,6 +57,7 @@ async function startApp(){
    changed('ai');return updated;
  });
  api('whatsapp:aiDiagnostics',()=>({...aiResponder.stats}));
+ api('whatsapp:aiTest',()=>aiResponder.testConnection());
  api('whatsapp:copyDiagnostics',()=>{
    // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
    const {qr,...diagnostics}=client.status;
