@@ -31,9 +31,12 @@ function normalizeMessage(m){
   const key=m?.key||{},jid=typeof key.remoteJid==='string'?key.remoteJid:'',id=typeof key.id==='string'?key.id:'';
   if(!isAllowedJid(jid)||!id||!m.message)return null;
   const c=unwrap(m.message),media=mediaFrom(c),text=textFrom(c);
+  // A chave alternativa é fornecida pelo WhatsApp; nunca deduzir LID de nome ou número.
+  const alt=typeof key.remoteJidAlt==='string'?key.remoteJidAlt:'';
+  const altJid=isAllowedJid(alt)&&alt!==jid&&alt.endsWith('@lid')!==jid.endsWith('@lid')?alt:null;
   const type=media?.kind||(c.reactionMessage?'reaction':c.protocolMessage?'protocol':'text');
   const quotedId=c.extendedTextMessage?.contextInfo?.stanzaId||c.imageMessage?.contextInfo?.stanzaId||c.videoMessage?.contextInfo?.stanzaId||null;
-  return{id,jid,participant:String(key.participant||''),fromMe:!!key.fromMe,senderName:String(m.pushName||'').slice(0,200),
+  return{id,jid,altJid,participant:String(key.participant||''),fromMe:!!key.fromMe,senderName:String(m.pushName||'').slice(0,200),
     timestamp:unixMs(m.messageTimestamp),type,text:type==='reaction'?(c.reactionMessage?.text||''):text,quotedId,media};
 }
 // Apenas contatos individuais; Baileys pode incluir um índice de dispositivo no JID.
