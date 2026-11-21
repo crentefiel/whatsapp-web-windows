@@ -30,7 +30,7 @@ class Store {
     const lid=a.endsWith('@lid')?a:b,pn=a.endsWith('@s.whatsapp.net')?a:b;
     if(!lid.endsWith('@lid')||!pn.endsWith('@s.whatsapp.net'))return null;
     const existing=this.db.prepare('SELECT pn FROM jid_aliases WHERE lid=?').get(lid)?.pn;
-    if(existing&&existing!==pn)return null;
+    if(existing)return existing===pn?pn:null;
     this.db.exec('BEGIN');
     try{
       this.db.prepare('INSERT OR IGNORE INTO jid_aliases(lid,pn) VALUES(?,?)').run(lid,pn);
