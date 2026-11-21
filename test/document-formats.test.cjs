@@ -66,7 +66,7 @@ test('envio de PPTX, XLSX, DOCX, ZIP, PDF e extensão desconhecida usa documento
     ['documento.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
     ['planilha.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     ['compactado.zip','application/zip'],
-    ['grafica.cdr','application/octet-stream'],
+    ['formato_desconhecido.xunknownformatx','application/octet-stream'],
   ];
   for(const [filename,expectedMime] of cases){
     const filePath=path.join(dir,filename);
@@ -78,6 +78,10 @@ test('envio de PPTX, XLSX, DOCX, ZIP, PDF e extensão desconhecida usa documento
     assert.equal(last.payload.document.url,filePath);
     assert.equal(last.payload.mimetype,expectedMime);
   }
-  assert.equal(sent.length,cases.length);
+  const corel=path.join(dir,'grafica.cdr');
+  await fs.writeFile(corel,Buffer.from('projeto sintetico'));
+  await client.sendAttachment(jid,corel,'document');
+  assert.equal(sent.at(-1).payload.fileName,'grafica.cdr');
+  assert.equal(sent.length,cases.length+1);
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
