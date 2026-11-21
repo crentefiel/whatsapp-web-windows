@@ -8,13 +8,26 @@
 <body>
 <main id="app">
  <aside>
-  <header><h1>WhatsApp Desktop</h1><span class="subtitle">Gráfica do Sorriso · Baileys</span></header>
-  <div class="connection">
-   <div class="conn-head"><strong id="state">Desconectado</strong><button id="connect">Conectar WhatsApp</button></div>
-   <div class="recovery"><button id="repair" type="button" hidden>Gerar novo QR Code</button></div>
-   <div id="qrcode" hidden><p>No celular, abra <b>Dispositivos conectados → Conectar dispositivo</b> e escaneie:</p><img id="qr" alt="QR Code de pareamento"></div>
-   <p id="detail" class="small"></p><p id="health" class="small"></p>
-  </div>
+  <header class="main-head">
+   <div class="brand"><h1>WhatsApp Desktop</h1><span class="subtitle">Gráfica do Sorriso · Baileys</span><span id="stateBrief" class="small" role="status">Desconectado</span></div>
+   <button id="openSettings" class="settings-gear" type="button" aria-label="Abrir configurações" aria-expanded="false" aria-controls="settingsPanel" title="Configurações">⚙</button>
+  </header>
+  <section id="settingsPanel" class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+   <div class="settings-head">
+    <h2 id="settingsTitle">Configurações</h2>
+    <button id="closeSettings" type="button" class="settings-close" aria-label="Fechar configurações">✕</button>
+   </div>
+   <div class="settings-group">
+    <h3>WhatsApp</h3>
+    <p class="small">Conexão e pareamento do WhatsApp. Outras configurações poderão ser adicionadas aqui depois.</p>
+    <div class="connection">
+     <div class="conn-head"><strong id="state">Desconectado</strong><button id="connect" type="button">Conectar WhatsApp</button></div>
+     <div class="recovery"><button id="repair" type="button" hidden>Gerar novo QR Code</button></div>
+     <div id="qrcode" hidden><p>No celular, abra <b>Dispositivos conectados → Conectar dispositivo</b> e escaneie:</p><img id="qr" alt="QR Code de pareamento"></div>
+     <p id="detail" class="small"></p><p id="health" class="small"></p>
+    </div>
+   </div>
+  </section>
   <label class="search-label">Buscar conversa<input id="search" type="search" placeholder="Nome ou identificador"></label>
   <div id="conversations" class="conversations" role="list"></div>
  </aside>
