@@ -62,9 +62,9 @@ async function startApp(){
    // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
    const {qr,...diagnostics}=client.status;
    const {enabled,allowedJids}=aiSettings.public();
-   const {sent,failed,skipped}=aiResponder.stats;
+   const {sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}=aiResponder.stats;
    clipboard.writeText(JSON.stringify({appVersion:app.getVersion(),...diagnostics,
-     ai:{enabled,allowedContacts:allowedJids.length,sent,failed,skipped}},null,2));
+     ai:{enabled,allowedContacts:allowedJids.length,sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}},null,2));
    return{copied:true};
  });
  api('whatsapp:start',()=>client.start());
