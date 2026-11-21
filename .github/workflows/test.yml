@@ -1,7 +1,7 @@
 name: Testes da base WhatsApp
 on:
   push:
-    branches: [main, 'feat/baileys-client-foundation']
+    branches: [main, 'feat/baileys-client-foundation', 'feat/observation-learning-memory']
   pull_request:
 jobs:
   teste:
