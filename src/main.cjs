@@ -96,10 +96,14 @@ async function startApp(){
    if(!isAllowedJid(jid)||typeof answer!=='string'||!answer.trim()||answer.length>3000)throw Error('Resposta inválida');
    const pending=learning.suggestion(jid);
    if(!pending||pending.id!==id)throw Error('Sugestão não está mais disponível');
-   // Envio somente após clique explícito do usuário.
-   const sent=await client.sendText(jid,answer.trim(),'human');
-   learning.finishSuggestion(id,jid,answer.trim(),'approved');
-   changed('learning');return sent;
+   // Bloqueia a sugestão enquanto a mensagem está sendo enviada.
+   // A própria mensagem enviada é observada como intervenção humana.
+   learning.beginSuggestion(id,jid);
+   try{
+     const sent=await client.sendText(jid,answer.trim(),'human');
+     learning.finishSuggestion(id,jid,answer.trim(),'approved');
+     changed('learning');return sent;
+   }catch(e){learning.cancelSuggestionSend(id,jid);throw e;}
  });
  api('whatsapp:copyDiagnostics',()=>{
    // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
