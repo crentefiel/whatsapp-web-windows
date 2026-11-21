@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-web-windows",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "WhatsApp Desktop independente com Baileys, histórico SQLite e envio de mídias",
   "private": true,
   "main": "src/main.cjs",
