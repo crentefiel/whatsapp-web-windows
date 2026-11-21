@@ -45,9 +45,16 @@
       <label>Instruções para a IA
         <textarea id="aiPrompt" rows="5" maxlength="4000"></textarea>
       </label>
+      <label>Quem a IA pode responder?
+        <select id="aiScope" aria-describedby="aiScopeHelp">
+          <option value="selected" selected>Somente contatos autorizados por você</option>
+          <option value="all">Todos os contatos individuais (sem grupos/canais/status)</option>
+        </select>
+      </label>
+      <p id="aiScopeHelp" class="small">No modo selecionado, abra uma conversa e clique em “Autorizar IA”. No modo todos, cada contato individual que enviar texto novo poderá receber resposta da IA. As mensagens de contexto poderão ser enviadas ao provedor configurado.</p>
       <label class="ai-check">
         <input id="aiEnabled" type="checkbox">
-        Ativar respostas automáticas para contatos autorizados
+        Ativar respostas automáticas no modo escolhido
       </label>
       <p id="aiAllowedCount" class="small">Contatos autorizados: 0</p>
       <p id="aiHealth" class="small">Respostas automáticas enviadas: 0 · Falhas: 0</p>
