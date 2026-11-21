@@ -8,6 +8,7 @@ const DEFAULTS=Object.freeze({
   model:'',
   systemPrompt:'Você é um assistente virtual de atendimento pelo WhatsApp. Responda em português brasileiro de forma clara, cordial e breve. Não invente fatos, preços ou promessas. Quando não souber, diga que uma pessoa deverá conferir.',
   allowedJids:[],
+  responseScope:'selected', // 'all' é ativado apenas por escolha explícita
 });
 function isLocalUrl(url){return url.hostname==='localhost'||url.hostname==='127.0.0.1'||url.hostname==='[::1]';}
 function validBaseUrl(value){
@@ -29,6 +30,10 @@ function sanitized(patch,current){
  if(Object.hasOwn(patch,'systemPrompt')){
   if(typeof patch.systemPrompt!=='string'||patch.systemPrompt.length>4000)throw Error('Instruções devem ter até 4000 caracteres');
   result.systemPrompt=patch.systemPrompt.trim()||DEFAULTS.systemPrompt;
+ }
+ if(Object.hasOwn(patch,'responseScope')){
+  if(!['all','selected'].includes(patch.responseScope))throw Error('Selecione o alcance das respostas: todos os contatos ou contatos autorizados');
+  result.responseScope=patch.responseScope;
  }
  if(Object.hasOwn(patch,'allowedJids')){
   if(!Array.isArray(patch.allowedJids)||patch.allowedJids.length>100||patch.allowedJids.some(j=>!isAllowedJid(j)))
@@ -74,7 +79,9 @@ class AiSettings{
   const clearing=patch?.clearKey===true;
   const hasNewKey=typeof patch?.apiKey==='string'&&Boolean(patch.apiKey);
   if(next.enabled){
-   if(!next.model||!next.allowedJids.length)throw Error('Defina o modelo e autorize pelo menos um contato antes de ativar a IA');
+   if(!next.model)throw Error('Defina o modelo da IA antes de ativar');
+   if(next.responseScope==='selected'&&!next.allowedJids.length)
+    throw Error('Autorize um contato na conversa ou escolha "Todos os contatos individuais" antes de ativar');
    const u=new URL(next.baseUrl);
    if(!isLocalUrl(u)&&!(this.hasKey()||hasNewKey)||clearing&&!hasNewKey&&!isLocalUrl(u))throw Error('Informe a chave da API para ativar respostas externas');
   }
@@ -97,7 +104,9 @@ class AutoResponder{
  allowed(jid){
   const config=this.settings.public();
   const target=this.store.resolveJid?.(jid)||jid;
-  return config.enabled&&config.allowedJids.some(allowed=>(this.store.resolveJid?.(allowed)||allowed)===target);
+  if(!config.enabled||!isAllowedJid(target))return false;
+  if(config.responseScope==='all')return true;
+  return config.allowedJids.some(allowed=>(this.store.resolveJid?.(allowed)||allowed)===target);
  }
  skip(reason){this.stats.skipped++;this.stats.lastSkip=reason;}
  handleIncoming(m,source){
