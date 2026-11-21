@@ -117,8 +117,13 @@ class AutoResponder{
    this.skip('Mensagem não elegível');return;
   }
   const jid=this.store.resolveJid?.(m.jid)||m.jid;
-  if(Number.isFinite(m.timestamp)&&Math.abs(Date.now()-m.timestamp)>5*60*1000){
-   this.skip('Mensagem antiga; sem resposta automática');return;
+  // Eventos 'notify' já distinguem mensagens novas do histórico ('append').
+  // Relógios do telefone e do Windows podem divergir: NUNCA rejeitar uma
+  // notificação por estar alguns minutos adiantada ou atrasada.
+  // Só bloquear um evento com data muito antiga (mais de 24 horas no passado).
+  // Uma data no futuro também não é motivo para descartar uma mensagem nova.
+  if(Number.isFinite(m.timestamp)&&m.timestamp>0&&Date.now()-m.timestamp>24*60*60*1000){
+   this.skip('Mensagem de mais de 24 horas; sem resposta automática');return;
   }
   // O mesmo texto pode ser entregue em append e depois notify.
   // Responder uma única vez por ID, mesmo se já foi gravado no SQLite.
