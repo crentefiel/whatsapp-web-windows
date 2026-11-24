@@ -102,11 +102,28 @@ class WhatsAppClient{
     if(!isAllowedJid(jid)||!id)return undefined;
     return this.recentMessages.get(jid+'|'+id)||this.store.messageContent?.(key);
   }
+  isNetworkAbort(err){
+    const msg=String(err?.message||err||'').toLowerCase();
+    return msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')||msg.includes('socket')||msg.includes('econnreset')||msg.includes('timeout');
+  }
+  async downloadWithRetry(downloader,raw,sock,attempts=3){
+    let lastErr;
+    for(let i=0;i<attempts;i++){
+      try{
+        const buffer=await downloader(raw,sock);
+        if(Buffer.isBuffer(buffer)&&buffer.length>0)return buffer;
+        throw Error('Download não retornou bytes');
+      }catch(e){
+        lastErr=e;
+        if(!this.isNetworkAbort(e)||i===attempts-1)throw e;
+        await new Promise(r=>setTimeout(r,800*(i+1)));
+      }
+    }
+    throw lastErr;
+  }
   async ingest(messages,source,sock){
     let anySaved=false,ignored=0,duplicates=0;
     const pendingMedia=[];
-    // Primeiro gravar TODO o lote de mensagens. Um arquivo lento não pode
-    // bloquear mensagens de texto que chegaram depois no mesmo evento.
     for(const raw of messages||[]){
       try{
         const m=normalizeMessage(raw);
@@ -134,8 +151,6 @@ class WhatsAppClient{
             this.status.lastSaved=new Date().toISOString();
           }
         }
-        // O Baileys às vezes entrega append e depois notify do mesmo ID.
-        // A IA decide se o evento notify é novo e trata duplicatas/idade.
         if(source==='tempo_real'&&!m.fromMe&&m.type==='text'){
           const eventKey=m.jid+'|'+m.id+'|'+m.participant;
           if(!this.aiNotified.has(eventKey)){
@@ -144,7 +159,6 @@ class WhatsAppClient{
             try{this.onIncoming?.(m,source);}catch(e){this.reportError('ia_evento',e);}
           }
         }
-        // Atualizar mídias incompletas quando um evento válido reaparece.
         if(source!=='envio'&&m.media&&m.media.size<=MEDIA_LIMIT&&(!exists||!this.store.linkedMedia(m))){
           pendingMedia.push({raw,m});
         }
@@ -153,15 +167,13 @@ class WhatsAppClient{
     this.status.ignored+=ignored;this.status.duplicates+=duplicates;
     if(anySaved)this.changed('conversas');
     this.changed('status');
-    // Baixar anexos só DEPOIS de persistir todas as mensagens do lote.
     for(const {raw,m} of pendingMedia){
       try{
         const b=await import('@whiskeysockets/baileys');
         const downloader=this.downloadMedia||((msg,client)=>b.downloadMediaMessage(msg,'buffer',{},{
           logger:this.logger,reuploadRequest:client?.updateMediaMessage
         }));
-        const buffer=await downloader(raw,sock);
-        if(!Buffer.isBuffer(buffer))throw Error('Download não retornou bytes');
+        const buffer=await this.downloadWithRetry(downloader,raw,sock);
         if(buffer.length>MEDIA_LIMIT)throw Error('Mídia excede 100 MB');
         if(this.store.linkedMedia(m))continue;
         const id=crypto.randomUUID();
@@ -199,7 +211,6 @@ class WhatsAppClient{
       kind==='video'?{video:data,caption:caption.slice(0,1000)}:{audio:data,mimetype};
     const sent=await this.socket.sendMessage(jid,content);
     await this.ingest([sent],'envio',this.socket);
-    // Anexo já está no computador: preservar cópia local sem redownload.
     const normalized=normalizeMessage(sent);
     if(normalized?.media&&normalized.id){
       try{
@@ -226,7 +237,6 @@ class WhatsAppClient{
   async repairSession(){
     if(this.status.state==='conectado')throw Error('A sessão está conectada; não é necessário refazer o QR.');
     if(this.starting)throw Error('Conexão em andamento. Tente novamente após a tentativa terminar.');
-    // Somente por ação confirmada do usuário: nunca elimina arquivos, histórico ou credenciais.
     this.stop();
     const archived=archiveBaileysSession(this.dataDir);
     await this.start();
