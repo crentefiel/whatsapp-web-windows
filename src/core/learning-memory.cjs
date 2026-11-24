@@ -171,23 +171,58 @@ class LearningMemory{
   return{updated,checked:rows.length};
  }
  forgetContacts(jids){
-  if(!Array.isArray(jids)||!jids.length||jids.length>500)throw Error('Selecione as conversas para apagar');
-  const unique=[];
+  if(!Array.isArray(jids)||!jids.length||jids.length>20000)throw Error('Selecione as conversas para apagar');
+  const seen=new Set(),unique=[];
   for(const raw of jids){
    const jid=this.jid(raw);
-   if(!unique.includes(jid))unique.push(jid);
+   if(!seen.has(jid)){seen.add(jid);unique.push(jid);}
   }
   const tables=['learning_examples','learning_suggestions','learning_human_hold','learning_bot_messages','learning_rules'];
   let removed=0;
   this.db.exec('BEGIN');
   try{
-   for(const jid of unique){
-    for(const table of tables)removed+=this.db.prepare(`DELETE FROM ${table} WHERE jid=?`).run(jid).changes;
+   for(let i=0;i<unique.length;i+=400){
+    const group=unique.slice(i,i+400);
+    const marks=group.map(()=>'?').join(',');
+    for(const table of tables)removed+=this.db.prepare(`DELETE FROM ${table} WHERE jid IN (${marks})`).run(...group).changes;
    }
    this.db.exec('COMMIT');
   }catch(e){this.db.exec('ROLLBACK');throw e;}
   this.changed('learning');
   return{removed,contacts:unique.length};
+ }
+ deleteExamples(ids){
+  if(!Array.isArray(ids)||!ids.length||ids.length>5000)throw Error('Selecione os exemplos para apagar');
+  const unique=[];
+  for(const raw of ids){
+   const id=Number(raw);
+   if(Number.isInteger(id)&&id>0&&!unique.includes(id))unique.push(id);
+  }
+  if(!unique.length)throw Error('Nenhum exemplo válido');
+  let removed=0;
+  this.db.exec('BEGIN');
+  try{
+   for(let i=0;i<unique.length;i+=400){
+    const group=unique.slice(i,i+400);
+    const marks=group.map(()=>'?').join(',');
+    removed+=this.db.prepare(`DELETE FROM learning_examples WHERE id IN (${marks})`).run(...group).changes;
+   }
+   this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+  if(removed)this.changed('learning');
+  return{removed};
+ }
+ deleteContactExamples(jid){
+  jid=this.jid(jid);
+  let removed=0;
+  this.db.exec('BEGIN');
+  try{
+   removed+=this.db.prepare('DELETE FROM learning_examples WHERE jid=?').run(jid).changes;
+   removed+=this.db.prepare('DELETE FROM learning_suggestions WHERE jid=?').run(jid).changes;
+   this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+  this.changed('learning');
+  return{removed,jid};
  }
  company(){
   return this.db.prepare('SELECT name,about,hours,address,catalog,updated_at FROM company_profile WHERE id=1').get()

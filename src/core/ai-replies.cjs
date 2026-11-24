@@ -12,6 +12,18 @@ const DEFAULTS=Object.freeze({
   responseScope:'selected', // 'all' é ativado apenas por escolha explícita
 });
 function isLocalUrl(url){return url.hostname==='localhost'||url.hostname==='127.0.0.1'||url.hostname==='[::1]';}
+function automaticGate(config){
+ const model=String(config?.model||'').trim();
+ let local=false;
+ try{local=isLocalUrl(new URL(String(config?.baseUrl||'')));}catch{local=false;}
+ if(!model||(!local&&!config?.hasKey)){
+  return{ok:false,openIa:true,message:'Salve o modelo e a chave da API na aba Inteligência antes do Automático. API no seu computador (localhost) não precisa de chave.'};
+ }
+ if(!config.enabled&&config.responseScope==='selected'&&!(config.allowedJids||[]).length){
+  return{ok:false,openIa:true,message:'Escolha "Todos os contatos individuais" ou autorize um contato antes do Automático. Nada foi ligado sozinho.'};
+ }
+ return{ok:true,enable:!config.enabled};
+}
 function validBaseUrl(value){
  if(typeof value!=='string'||value.length>250)throw Error('Endereço da API inválido');
  let u;try{u=new URL(value);}catch{throw Error('Endereço da API inválido');}
@@ -319,4 +331,4 @@ class AutoResponder{
   this.pending.clear();
  }
 }
-module.exports={AiSettings,AutoResponder,validBaseUrl};
+module.exports={AiSettings,AutoResponder,validBaseUrl,automaticGate};

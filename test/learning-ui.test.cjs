@@ -132,4 +132,62 @@ test('abas, paginação, regra vazia, empresa e apagar conversa ficam fora do ca
  await get('forgetChats').handlers.click();await tick();
  assert.deepEqual(forgotten,[JID]);
  assert.equal(get('conversations').children.length,0);
+ assert.equal(get('error').textContent,'','apagar conversa não escreve recado no campo de mensagem');
+});
+
+test('apagar exemplo, modo automático incompleto e selecionar todas as conversas',async()=>{
+ const elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,elem(id));return elements.get(id);};
+ get('settingsPanel').hidden=true;
+ const many=Array.from({length:600},(_,i)=>'551190000'+String(i).padStart(4,'0')+'@s.whatsapp.net');
+ many.push(JID);
+ let mode='suggestion',deleted=null,wiped=null,forgotten=null;
+ const whatsapp={
+  status:async()=>({state:'conectado'}),
+  conversations:async()=>forgotten?[]:[{jid:JID,name:'Cliente',preview:'Oi'},{jid:many[0],name:'Outro',preview:'a'}],
+  conversationJids:async()=>many,
+  messages:async()=>[],onChange(){},
+  aiSettings:async()=>({enabled:false,baseUrl:'https://api.openai.com/v1',model:'gpt',systemPrompt:'',allowedJids:[],responseScope:'selected',hasKey:true}),
+  aiDiagnostics:async()=>({}),
+  learnStats:async()=>({mode,examples:2,approved:0,approvedRules:0,contacts:1}),
+  learnMode:async next=>{
+   if(next==='automatic')return{canceled:true,openIa:true,mode,message:'Salve o modelo e a chave da API na aba Inteligência antes do Automático.'};
+   mode=next;return{canceled:false,mode};
+  },
+  learnExamplesPage:async()=>({items:[{id:8,question:'quero um orçamento',reply:'Qual o papel?',status:'observed'}],total:1,page:1,pages:1,size:8}),
+  learnRules:async()=>[],
+  learnSuggestion:async()=>null,
+  learnDeleteExamples:async ids=>{deleted=[...ids];return{canceled:false,removed:ids.length};},
+  learnDeleteContactExamples:async jid=>{wiped=jid;return{canceled:false,removed:4};},
+  forgetChats:async jids=>{forgotten=[...jids];return{canceled:false,messages:1,contacts:jids.length};}
+ };
+ const document={getElementById:get,createElement:()=>elem(),createDocumentFragment:()=>elem(),addEventListener(){},body:{classList:{toggle(){}}}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/ui.js'),'utf8'),{window:{whatsapp},document,Date,console});
+ await tick();await tick();await tick();
+ await get('conversations').children[0].handlers.click();await tick();await tick();
+ const card=get('learnExamples').children[0];
+ assert.match(card.children[0].textContent,/quero um orçamento/);
+ assert.equal(card.children[2].value,'Qual o papel?');
+ assert.equal(card.children[3].children[0].textContent,'Corrigir / aprovar');
+ assert.equal(card.children[3].children[2].textContent,'Apagar');
+ assert.equal(get('learnExamples').children.includes(get('learnExampleTools')),false);
+ await card.children[3].children[2].handlers.click();await tick();
+ assert.deepEqual(deleted,[8]);
+ card.children[0].children[0].checked=true;
+ await card.children[0].children[0].handlers.change();
+ await get('learnDeleteSelected').handlers.click();await tick();
+ assert.deepEqual(deleted,[8]);
+ await get('learnDeleteContact').handlers.click();await tick();
+ assert.equal(wiped,JID);
+ get('learnMode').value='automatic';
+ await get('learnMode').handlers.change();await tick();
+ assert.equal(get('learnMode').value,'suggestion');
+ assert.equal(get('panelIa').hidden,false);
+ assert.match(get('aiResult').textContent,/aba Inteligência/);
+ assert.doesNotMatch(get('learnResult').textContent,/invoking remote method/);
+ await get('pickChats').handlers.click();
+ await get('pickAll').handlers.click();await tick();
+ assert.equal(get('forgetChats').textContent,'Apagar 601');
+ await get('forgetChats').handlers.click();await tick();
+ assert.equal(forgotten.length,601);
+ assert.equal(get('error').textContent,'');
 });

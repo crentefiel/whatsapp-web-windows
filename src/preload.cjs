@@ -2,7 +2,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 const call=(action,...args)=>ipcRenderer.invoke('whatsapp:'+action,...args);
 contextBridge.exposeInMainWorld('whatsapp',Object.freeze({
- start:()=>call('start'),repair:()=>call('repair'),status:()=>call('status'),copyDiagnostics:()=>call('copyDiagnostics'),conversations:()=>call('conversations'),
+ start:()=>call('start'),repair:()=>call('repair'),status:()=>call('status'),copyDiagnostics:()=>call('copyDiagnostics'),conversations:()=>call('conversations'),conversationJids:()=>call('conversationJids'),
  messages:jid=>call('messages',jid),sendText:(jid,text)=>call('sendText',jid,text),
  sendFile:(jid,kind,caption)=>call('sendFile',jid,kind,caption),
  saveMedia:id=>call('saveMedia',id),profile:jid=>call('profile',jid),
@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('whatsapp',Object.freeze({
  learnExamplesPage:(jid,page)=>call('learnExamplesPage',jid,page),
  learnRepair:()=>call('learnRepair'),
  learnExampleUpdate:(id,reply,status)=>call('learnExampleUpdate',id,reply,status),
+ learnDeleteExamples:ids=>call('learnDeleteExamples',ids),
+ learnDeleteContactExamples:jid=>call('learnDeleteContactExamples',jid),
  learnRules:jid=>call('learnRules',jid),
  learnAddRule:(text,jid)=>call('learnAddRule',text,jid),
  learnApproveRule:(id,approve)=>call('learnApproveRule',id,approve),

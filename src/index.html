@@ -92,7 +92,11 @@
     <p id="learnResult" class="small" role="status"></p>
     <button id="learnRepair" type="button" class="secondary-action">Atualizar falas do cliente</button>
     <h3>Exemplos deste contato</h3>
-    <p class="small">Cada cartão mostra o que o cliente falou e o que você respondeu. Corrija, aprove ou descarte.</p>
+    <p class="small">Cada cartão mostra o que o cliente falou e o que você respondeu. Marque os que quiser apagar. O que sair daqui a IA deixa de usar.</p>
+    <div id="learnExampleTools" class="learning-actions" hidden>
+      <button id="learnDeleteSelected" type="button" class="danger" disabled>Apagar marcados</button>
+      <button id="learnDeleteContact" type="button" class="danger">Apagar todos deste contato</button>
+    </div>
     <div id="learnExamples" class="learning-examples"></div>
     <div id="learnPager" class="learning-actions" hidden></div>
     <h3>Regras de atendimento</h3>

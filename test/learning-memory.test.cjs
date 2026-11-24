@@ -273,6 +273,45 @@ test('apagar um cliente tira a memória dele e preserva os outros e a regra da e
  }finally{x.close();}
 });
 
+test('apagar exemplos escolhidos ou o contato inteiro tira a resposta da IA e preserva os outros',()=>{
+ const x=createCase();try{
+  seed(x.store,A);seed(x.store,B);x.learning.rebuild();
+  const idA=x.learning.examples(A)[0].id;
+  const global=Number(x.learning.addRule('Fechamos aos domingos'));
+  x.learning.saveSuggestion(A,'pergunta','Posso sugerir um horário?');
+  assert.equal(x.learning.deleteExamples([idA]).removed,1);
+  assert.equal(x.learning.examples(A).length,0);
+  assert.equal(x.learning.examples(B).length,1);
+  assert.equal(x.learning.rules(B).some(r=>r.id===global),true);
+  const t=Date.now()-1000;
+  x.store.save(m(A,'q2',false,'Qual o horário de atendimento?',t));
+  x.store.save(m(A,'a2',true,'De segunda a sexta, das 9 às 17.',t+10));
+  x.learning.rebuild();
+  assert.ok(x.learning.examples(A).length>=1);
+  const wiped=x.learning.deleteContactExamples(A);
+  assert.ok(wiped.removed>=1);
+  assert.equal(x.learning.examples(A).length,0);
+  assert.equal(x.learning.suggestion(A),null);
+  assert.equal(x.learning.examples(B).length,1);
+  assert.equal(x.learning.canAuto(A,'Qual o horário de atendimento?').ok,false);
+ }finally{x.close();}
+});
+
+test('dá para listar e apagar mais conversas do que as 500 da tela',()=>{
+ const x=createCase();try{
+  for(let i=0;i<520;i++)x.store.contact('55119'+String(i).padStart(8,'0')+'@s.whatsapp.net','Cliente '+i,i);
+  assert.equal(x.store.conversations().length,500);
+  const jids=x.store.conversationJids();
+  assert.equal(jids.length,520);
+  assert.doesNotThrow(()=>x.learning.forgetContacts(jids));
+  const chats=x.store.forgetChats(jids);
+  assert.equal(chats.contacts,520);
+  assert.equal(x.store.conversationJids().length,0);
+  assert.throws(()=>x.store.forgetChats([]),/Selecione/);
+  assert.throws(()=>x.learning.forgetContacts(Array.from({length:20001},(_,i)=>'55119'+String(i).padStart(8,'0')+'@s.whatsapp.net')),/Selecione/);
+ }finally{x.close();}
+});
+
 test('cadastro da empresa vira fato oficial e o preço do catálogo pode ser dito',async()=>{
  const x=createCase();try{
   const t=Date.now()-60000;

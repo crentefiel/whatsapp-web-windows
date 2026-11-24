@@ -5,6 +5,7 @@ let currentState='desconectado',sendingText=false,sendingFile=false;
 let aiConfig={enabled:false,allowedJids:[],hasKey:false,responseScope:'selected'};
 let learningMode='observation',currentSuggestion=null,learnPage=1,settingsTab='whatsapp',picking=false;
 const picked=new Set();
+const pickedExamples=new Set();
 const learningLabels={
  observation:'Observação: a IA aprende com suas respostas humanas, mas não sugere nem envia mensagens.',
  suggestion:'Sugestão: a IA prepara uma resposta editável. Só envia depois da sua aprovação.',
@@ -40,26 +41,60 @@ function smallDiv(className,content){
 function exampleCard(item){
  const card=document.createElement('div');card.className='learn-example';
  const question=smallDiv('small','Cliente disse:\n'+item.question);
+ const box=document.createElement('input');
+ box.type='checkbox';box.className='pick-example';box.checked=pickedExamples.has(item.id);
+ box.setAttribute('aria-label','Selecionar este exemplo');
+ box.addEventListener('click',ev=>ev?.stopPropagation?.());
+ box.addEventListener('change',()=>{
+  if(box.checked)pickedExamples.add(item.id);else pickedExamples.delete(item.id);
+  refreshExampleTools();
+ });
+ if(typeof question.insertBefore==='function'&&question.firstChild)question.insertBefore(box,question.firstChild);
+ else question.append(box);
  const label=smallDiv('small','Sua resposta ('+item.status+'):');
  const editable=document.createElement('textarea');editable.value=item.reply;editable.rows=3;editable.maxLength=3000;
  const row=document.createElement('div');row.className='learning-actions';
  const approve=document.createElement('button');approve.type='button';approve.textContent='Corrigir / aprovar';
  const reject=document.createElement('button');reject.type='button';reject.className='secondary-action';reject.textContent='Desconsiderar';
+ const remove=document.createElement('button');remove.type='button';remove.className='danger';remove.textContent='Apagar';
  approve.addEventListener('click',async()=>{
   try{
    await window.whatsapp.learnExampleUpdate(item.id,editable.value,'approved');
    learningStatus('Exemplo aprovado e guardado na memória.');
    await loadLearningDetails();await loadLearningOverview();
-  }catch(e){learningStatus(e.message);}
+  }catch(e){learningStatus(readableError(e));}
  });
  reject.addEventListener('click',async()=>{
   try{
    await window.whatsapp.learnExampleUpdate(item.id,editable.value,'rejected');
    learningStatus('Exemplo descartado do aprendizado.');
    await loadLearningDetails();await loadLearningOverview();
-  }catch(e){learningStatus(e.message);}
+  }catch(e){learningStatus(readableError(e));}
  });
- row.append(approve,reject);card.append(question,label,editable,row);return card;
+ remove.addEventListener('click',async()=>{
+  if(typeof window.whatsapp.learnDeleteExamples!=='function'){learningStatus('Apagar exemplos não está disponível nesta versão.');return;}
+  try{
+   const result=await window.whatsapp.learnDeleteExamples([item.id]);
+   if(!result||result.canceled)return;
+   pickedExamples.delete(item.id);
+   learningStatus('Exemplo apagado. A IA deixa de usar essa resposta.');
+   await loadLearningDetails();await loadLearningOverview();
+  }catch(e){learningError(e);}
+ });
+ row.append(approve,reject,remove);card.append(question,label,editable,row);return card;
+}
+function refreshExampleTools(){
+ const bar=$('learnExampleTools');
+ if(!bar)return;
+ const can=typeof window.whatsapp.learnDeleteExamples==='function';
+ bar.hidden=!can;
+ const del=$('learnDeleteSelected');
+ if(del){
+  del.disabled=!pickedExamples.size;
+  del.textContent=pickedExamples.size?('Apagar '+pickedExamples.size+' marcados'):'Apagar marcados';
+ }
+ const all=$('learnDeleteContact');
+ if(all)all.disabled=!selected;
 }
 async function loadLearningDetails(){
  if(typeof window.whatsapp.learnExamples!=='function'&&typeof window.whatsapp.learnExamplesPage!=='function')return;
@@ -68,6 +103,7 @@ async function loadLearningDetails(){
  if(!jid){
   sampleHost.replaceChildren(smallDiv('small','Selecione uma conversa para rever exemplos.'));
   if(pager){pager.hidden=true;pager.replaceChildren();}
+  refreshExampleTools();
  }else{
   let items=[],page=1,pages=1,total=0;
   if(typeof window.whatsapp.learnExamplesPage==='function'){
@@ -81,6 +117,7 @@ async function loadLearningDetails(){
   }
   const entries=items.map(exampleCard);
   sampleHost.replaceChildren(...(entries.length?entries:[smallDiv('small','Ainda sem exemplos deste contato. Continue conversando normalmente ou importe o histórico local.')]));
+  refreshExampleTools();
   if(pager){
    if(pages<=1){pager.hidden=true;pager.replaceChildren();}
    else{
@@ -136,7 +173,10 @@ async function loadLearningSuggestion(){
   $('learnSuggestionResult').textContent='';
  }
 }
-function learningError(e){learningStatus(e?.message||String(e));}
+function learningError(e){learningStatus(readableError(e));}
+function readableError(value){
+ return String(value&&value.message?value.message:value||'').replace(/^Error invoking remote method '[^']+':\s*/i,'').replace(/^Error:\s*/,'');
+}
 
 function refreshComposer(){
  const hasContact=Boolean(selected),connected=currentState==='conectado';
@@ -217,7 +257,7 @@ function toggleSettings(open){
   void loadLearningOverview().then(()=>loadLearningDetails()).catch(learningError);
  }else{$('openSettings').focus();}
 }
-function error(message){$('error').textContent=String(message||'').slice(0,220);}
+function error(message){$('error').textContent=readableError(message).slice(0,220);}
 function readable(jid){return String(jid||'').split('@')[0];}
 function dateString(ms){const value=typeof ms==='string'&&ms.includes('T')?Date.parse(ms):Number(ms);return new Date(Number.isFinite(value)?value:Date.now()).toLocaleString('pt-BR');}
 async function status(){
@@ -300,7 +340,7 @@ function renderChats(){
 }
 async function conversations(){try{chats=await window.whatsapp.conversations();renderChats();}catch(e){error(e.message);}}
 async function choose(c){
- selected=c.jid;learnPage=1;$('contactTitle').textContent=c.name||readable(c.jid);$('contactJid').textContent=c.jid;
+ selected=c.jid;learnPage=1;pickedExamples.clear();$('contactTitle').textContent=c.name||readable(c.jid);$('contactJid').textContent=c.jid;
  $('refreshPhoto').hidden=false;$('openContactFolder').hidden=false;photo(c.jid,c.photo);renderChats();refreshComposer();refreshAiContact();await messages();await status();
  void loadLearningDetails().catch(learningError);
 }
@@ -394,7 +434,19 @@ $('pickChats').addEventListener('click',()=>{
  if(!picking)picked.clear();
  renderChats();
 });
-$('pickAll').addEventListener('click',()=>{
+$('pickAll').addEventListener('click',async()=>{
+ const query=$('search').value.trim();
+ if(!query&&typeof window.whatsapp.conversationJids==='function'){
+  try{
+   const jids=await window.whatsapp.conversationJids();
+   if(Array.isArray(jids)&&jids.length){
+    const allOn=jids.every(j=>picked.has(j));
+    for(const j of jids){if(allOn)picked.delete(j);else picked.add(j);}
+    renderChats();
+    return;
+   }
+  }catch(e){error(e.message);return;}
+ }
  const visible=visibleChats();
  const allOn=visible.length>0&&visible.every(c=>picked.has(c.jid));
  for(const c of visible){if(allOn)picked.delete(c.jid);else picked.add(c.jid);}
@@ -412,7 +464,7 @@ $('forgetChats').addEventListener('click',async()=>{
   if(removedOpen)clearOpenChat();
   await conversations();
   await loadLearningOverview().catch(()=>{});
-  error('Apagado só neste computador. A memória desses clientes também foi esquecida.');
+  error('');
  }catch(e){error(e.message);}
 });
 document.addEventListener('keydown',event=>{
@@ -431,8 +483,19 @@ $('learnMode').addEventListener('change',async()=>{
  const next=$('learnMode').value,previous=learningMode;
  try{
   const result=await window.whatsapp.learnMode(next);
-  if(result?.canceled){$('learnMode').value=previous;return;}
+  if(result?.canceled){
+   $('learnMode').value=previous;
+   if(result.message){
+    learningStatus(result.message);
+    if(result.openIa&&$('aiResult'))$('aiResult').textContent=result.message;
+   }
+   if(result.openIa)showTab('ia');
+   return;
+  }
   await loadLearningOverview();
+  if(learningMode==='automatic'){
+   try{aiConfig=await window.whatsapp.aiSettings();$('aiEnabled').checked=Boolean(aiConfig.enabled);}catch{}
+  }
   learningStatus('Modo atualizado: '+(learningLabels[learningMode]||learningMode));
   await loadLearningSuggestion();
  }catch(e){$('learnMode').value=previous;learningError(e);}
@@ -445,6 +508,29 @@ $('learnBackfill').addEventListener('click',async()=>{
   learningStatus('Histórico importado: '+report.imported+' novos exemplos, total '+report.total+'. Nenhuma regra ou preço foi aprovado automaticamente.');
   await loadLearningOverview();await loadLearningDetails();
  }catch(e){learningError(e);}finally{btn.disabled=false;}
+});
+$('learnDeleteSelected').addEventListener('click',async()=>{
+ if(!pickedExamples.size)return;
+ if(typeof window.whatsapp.learnDeleteExamples!=='function'){learningStatus('Apagar exemplos não está disponível nesta versão.');return;}
+ const ids=[...pickedExamples];
+ try{
+  const result=await window.whatsapp.learnDeleteExamples(ids);
+  if(!result||result.canceled)return;
+  pickedExamples.clear();
+  learningStatus('Exemplos apagados. A IA deixa de usar essas respostas.');
+  await loadLearningDetails();await loadLearningOverview();
+ }catch(e){learningError(e);}
+});
+$('learnDeleteContact').addEventListener('click',async()=>{
+ if(!selected){learningStatus('Selecione um contato primeiro.');return;}
+ if(typeof window.whatsapp.learnDeleteContactExamples!=='function'){learningStatus('Apagar exemplos não está disponível nesta versão.');return;}
+ try{
+  const result=await window.whatsapp.learnDeleteContactExamples(selected);
+  if(!result||result.canceled)return;
+  pickedExamples.clear();
+  learningStatus('Exemplos deste contato apagados. A IA não responde mais com base neles.');
+  await loadLearningDetails();await loadLearningOverview();
+ }catch(e){learningError(e);}
 });
 $('learnRuleAdd').addEventListener('click',async()=>{
  const text=$('learnRuleText').value,jid=$('learnRuleScope').value==='contact'?selected:null;

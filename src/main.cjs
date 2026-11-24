@@ -2,7 +2,7 @@
 const {app,BrowserWindow,ipcMain,dialog,protocol,net,shell,Menu,clipboard,safeStorage}=require('electron');
 const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('node:url');
 const {Store}=require('./core/database.cjs');
-const {AiSettings,AutoResponder}=require('./core/ai-replies.cjs');
+const {AiSettings,AutoResponder,automaticGate}=require('./core/ai-replies.cjs');
 const {LearningMemory}=require('./core/learning-memory.cjs');
 const {WhatsAppClient}=require('./core/wa-client.cjs');
 const {isAllowedJid}=require('./core/messages.cjs');
@@ -93,7 +93,8 @@ async function startApp(){
  api('whatsapp:learnMode',async mode=>{
    if(!['observation','suggestion','automatic'].includes(mode))throw Error('Modo inválido');
    if(mode==='automatic'){
-     if(!aiSettings.public().enabled)throw Error('Ative a IA e salve as configurações da API antes de selecionar Automático');
+     const gate=automaticGate(aiSettings.public());
+     if(!gate.ok)return{canceled:true,openIa:true,message:gate.message};
      const choice=await dialog.showMessageBox(window,{
        type:'warning',title:'Ativar respostas automáticas',
        message:'Ativar o modo Automático com a memória aprendida?',
@@ -101,6 +102,10 @@ async function startApp(){
        buttons:['Cancelar','Ativar Automático'],defaultId:0,cancelId:0,noLink:true
      });
      if(choice.response!==1)return{canceled:true,mode:learning.mode()};
+     if(gate.enable){
+       try{aiSettings.update({enabled:true});changed('ai');}
+       catch(e){return{canceled:true,openIa:true,message:e.message};}
+     }
    }
    aiResponder.cancelPending();
    return{canceled:false,mode:learning.setMode(mode)};
@@ -110,6 +115,32 @@ async function startApp(){
  api('whatsapp:learnExamplesPage',(jid,page)=>learning.examplesPage(jid,page));
  api('whatsapp:learnRepair',()=>learning.repairQuestions());
  api('whatsapp:learnExampleUpdate',(id,reply,status)=>learning.sampleUpdate(id,{reply,status}));
+ api('whatsapp:learnDeleteExamples',async ids=>{
+  if(!Array.isArray(ids)||!ids.length)throw Error('Selecione os exemplos para apagar');
+  if(ids.length>1){
+   const choice=await dialog.showMessageBox(window,{
+    type:'warning',title:'Apagar exemplos da memória',
+    message:'Apagar '+ids.length+' exemplos da memória?',
+    detail:'A IA deixa de usar essas respostas. Isso não apaga a conversa no celular do cliente.',
+    buttons:['Cancelar','Apagar exemplos'],defaultId:0,cancelId:0,noLink:true
+   });
+   if(choice.response!==1)return{canceled:true};
+  }
+  const result=learning.deleteExamples(ids);
+  return{canceled:false,...result};
+ });
+ api('whatsapp:learnDeleteContactExamples',async jid=>{
+  if(!isAllowedJid(jid))throw Error('Contato inválido');
+  const choice=await dialog.showMessageBox(window,{
+   type:'warning',title:'Apagar exemplos deste contato',
+   message:'Apagar todos os exemplos deste contato?',
+   detail:'A IA deixa de responder com base no que aprendeu com ele. A conversa no celular do cliente continua.',
+   buttons:['Cancelar','Apagar exemplos'],defaultId:0,cancelId:0,noLink:true
+  });
+  if(choice.response!==1)return{canceled:true};
+  const result=learning.deleteContactExamples(jid);
+  return{canceled:false,...result};
+ });
  api('whatsapp:learnRules',jid=>learning.rules(jid||null));
  api('whatsapp:learnAddRule',(text,jid)=>Number(learning.addRule(text,jid||null)));
  api('whatsapp:learnApproveRule',(id,approve)=>learning.approveRule(id,approve));
@@ -176,6 +207,7 @@ async function startApp(){
    return client.repairSession();
  });
  api('whatsapp:conversations',()=>store.conversations());
+ api('whatsapp:conversationJids',()=>store.conversationJids());
  api('whatsapp:messages',jid=>{if(!isAllowedJid(jid))throw Error('Identificador inválido');return store.messages(jid);});
  api('whatsapp:sendText',(jid,text)=>client.sendText(jid,text));
  api('whatsapp:profile',jid=>client.profile(jid));
