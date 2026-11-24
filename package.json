@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-web-windows",
-  "version": "0.4.0-beta.1",
-  "description": "WhatsApp Desktop independente com Baileys, histórico SQLite e envio de mídias",
+  "version": "0.4.1-beta.1",
+  "description": "WhatsApp Desktop independente com Baileys, histórico SQLite, aprendizado por observação e IA",
   "private": true,
   "main": "src/main.cjs",
   "author": "Grafica do Sorriso",
