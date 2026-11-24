@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; media-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>WhatsApp Desktop — Gráfica do Sorriso</title><link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<main id="app">
+ <aside>
+  <header class="main-head">
+   <div class="brand"><h1>WhatsApp Desktop</h1><span class="subtitle">Gráfica do Sorriso · Baileys</span><span id="stateBrief" class="small" role="status">Desconectado</span></div>
+   <button id="openSettings" class="settings-gear" type="button" aria-label="Abrir configurações" aria-expanded="false" aria-controls="settingsPanel" title="Configurações">⚙</button>
+  </header>
+  <div id="learningBanner" class="learning-banner" role="status">Modo: Observação · Aprendendo com suas respostas</div>
+  <section id="settingsPanel" class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+   <div class="settings-head">
+    <h2 id="settingsTitle">Configurações</h2>
+    <button id="closeSettings" type="button" class="settings-close" aria-label="Fechar configurações">✕</button>
+   </div>
+   <div class="settings-tabs" role="tablist">
+    <button id="tabWhatsapp" type="button" class="tab active" role="tab">WhatsApp</button>
+    <button id="tabIa" type="button" class="tab" role="tab">Inteligência</button>
+    <button id="tabMemoria" type="button" class="tab" role="tab">Memória</button>
+    <button id="tabEmpresa" type="button" class="tab" role="tab">Empresa</button>
+   </div>
+   <div class="settings-body">
+   <div id="panelWhatsapp" class="settings-group">
+    <h3>WhatsApp</h3>
+    <p class="small">Conexão e pareamento. O diagnóstico longo fica recolhido para a tela caber sem barra extra.</p>
+    <div class="connection">
+     <div class="conn-head"><strong id="state">Desconectado</strong><button id="connect" type="button">Conectar WhatsApp</button></div>
+     <div class="recovery"><button id="repair" type="button" hidden>Gerar novo QR Code</button></div>
+     <div id="qrcode" hidden><p>No celular, abra <b>Dispositivos conectados → Conectar dispositivo</b> e escaneie:</p><img id="qr" alt="QR Code de pareamento"></div>
+     <p id="detail" class="small"></p>
+     <details class="diagnostics"><summary>Diagnóstico da conexão</summary><p id="health" class="small"></p><button id="copyDiagnostics" type="button" class="diagnostics-button">Copiar diagnóstico</button></details>
+    </div>
+   </div>
+
+   <div id="panelIa" class="settings-group ai-settings" hidden>
+    <h3>Inteligência artificial</h3>
+    <p class="small">API compatível com OpenAI. No modo Observação a IA só acompanha. No modo Sugestão ela escreve e espera você. No Automático só envia se você confirmar aqui e nas regras.</p>
+    <form id="aiForm" class="ai-form">
+      <label>URL base da API
+        <input id="aiBaseUrl" type="url" placeholder="https://api.openai.com/v1" required autocomplete="off">
+      </label>
+      <label>Nome do modelo
+        <input id="aiModel" type="text" placeholder="Nome exato do modelo no seu provedor" maxlength="120" required autocomplete="off">
+      </label>
+      <label>Chave da API
+        <input id="aiApiKey" type="password" placeholder="Deixe vazio para manter a chave salva" maxlength="1000" autocomplete="new-password">
+      </label>
+      <p id="aiKeyStatus" class="small">Nenhuma chave configurada.</p>
+      <label>Instruções para a IA
+        <textarea id="aiPrompt" rows="5" maxlength="4000"></textarea>
+      </label>
+      <label>Quem a IA pode responder?
+        <select id="aiScope" aria-describedby="aiScopeHelp">
+          <option value="selected" selected>Somente contatos autorizados por você</option>
+          <option value="all">Todos os contatos individuais (sem grupos/canais/status)</option>
+        </select>
+      </label>
+      <p id="aiScopeHelp" class="small">No modo selecionado, abra uma conversa e clique em “Autorizar IA”. No modo todos, cada contato individual que enviar texto novo poderá receber resposta da IA. As mensagens de contexto poderão ser enviadas ao provedor configurado.</p>
+      <label class="ai-check">
+        <input id="aiEnabled" type="checkbox">
+        Habilitar envio automático quando o modo Automático for confirmado
+      </label>
+      <p id="aiAllowedCount" class="small">Contatos autorizados: 0</p>
+      <p id="aiHealth" class="small">Respostas automáticas enviadas: 0 · Falhas: 0</p>
+      <div class="ai-actions">
+        <button id="aiSave" type="submit">Salvar configurações da IA</button>
+        <button id="aiTest" type="button" class="secondary-action">Testar conexão com a IA</button>
+        <button id="aiClearKey" type="button" class="secondary-action">Apagar chave salva</button>
+      </div>
+      <p id="aiResult" class="small" role="status"></p>
+      <p id="aiTestResult" class="small" role="status" aria-live="polite"></p>
+    </form>
+   </div>
+   <div id="panelMemoria" class="settings-group learning-settings" hidden>
+    <h3>Memória e aprendizado</h3>
+    <p class="small">Guarda a fala do cliente e a sua resposta. Áudio sem texto aparece como áudio — a IA ainda não transcreve voz. Nada vira preço oficial sem a sua aprovação.</p>
+    <label class="learning-label">Modo de trabalho
+      <select id="learnMode">
+        <option value="observation">Observação — aprende, não envia</option>
+        <option value="suggestion">Sugestão — prepara para você revisar e enviar</option>
+        <option value="automatic">Automático — responde com exemplos aprendidos</option>
+      </select>
+    </label>
+    <p id="learnModeHint" class="small">Observação: nenhuma resposta automática.</p>
+    <button id="learnBackfill" type="button" class="secondary-action">Importar exemplos do histórico local</button>
+    <p id="learnStats" class="small">Memória: aguardando...</p>
+    <p id="learnResult" class="small" role="status"></p>
+    <button id="learnRepair" type="button" class="secondary-action">Atualizar falas do cliente</button>
+    <h3>Exemplos deste contato</h3>
+    <p class="small">Cada cartão mostra o que o cliente falou e o que você respondeu. Corrija, aprove ou descarte.</p>
+    <div id="learnExamples" class="learning-examples"></div>
+    <div id="learnPager" class="learning-actions" hidden></div>
+    <h3>Regras de atendimento</h3>
+    <p class="small">Cadastre uma regra como rascunho. Somente depois de clicar em Aprovar ela será tratada como regra confirmada. Preços novos nunca são aprovados automaticamente.</p>
+    <textarea id="learnRuleText" rows="3" maxlength="1000" placeholder="Ex.: Prazo confirmado ou política de atendimento"></textarea>
+    <label class="learning-label">Aplicar regra
+      <select id="learnRuleScope"><option value="global">Todos os contatos</option><option value="contact">Somente o contato selecionado</option></select>
+    </label>
+    <button id="learnRuleAdd" type="button" class="secondary-action">Salvar regra como rascunho</button>
+    <div id="learnRules" class="learning-rules"></div>
+   </div>
+   <div id="panelEmpresa" class="settings-group company-settings" hidden>
+    <h3>Informações da empresa</h3>
+    <p class="small">Estes dados entram na resposta da IA. Se o WhatsApp for comercial, dá para puxar perfil e catálogo. Preço escrito aqui pode ser usado; preço inventado pela IA continua bloqueado.</p>
+    <form id="companyForm" class="ai-form">
+     <label>Nome
+      <input id="companyName" type="text" maxlength="120" placeholder="Gráfica do Sorriso" autocomplete="organization">
+     </label>
+     <label>Sobre a empresa
+      <textarea id="companyAbout" rows="3" maxlength="2000" placeholder="O que vocês imprimem, formas de pagamento, o que não fazem"></textarea>
+     </label>
+     <label>Horário
+      <textarea id="companyHours" rows="2" maxlength="500" placeholder="Segunda a sexta, 8h às 18h"></textarea>
+     </label>
+     <label>Endereço
+      <input id="companyAddress" type="text" maxlength="500" placeholder="Rua, bairro, cidade" autocomplete="street-address">
+     </label>
+     <label>Catálogo e preços
+      <textarea id="companyCatalog" rows="4" maxlength="8000" placeholder="1000 cartões 4/0 couche — R$ 90"></textarea>
+     </label>
+     <div class="ai-actions">
+      <button id="companySave" type="submit">Salvar dados da empresa</button>
+      <button id="companyPull" type="button" class="secondary-action">Buscar do WhatsApp</button>
+     </div>
+     <p id="companyResult" class="small" role="status"></p>
+    </form>
+   </div>
+   </div>
+  </section>
+  <label class="search-label">Buscar conversa<input id="search" type="search" placeholder="Nome ou identificador"></label>
+  <div class="chat-tools">
+   <button id="pickChats" type="button" class="ghost">Selecionar</button>
+   <button id="pickAll" type="button" class="ghost" hidden>Todos</button>
+   <button id="forgetChats" type="button" class="danger" hidden>Apagar selecionadas</button>
+  </div>
+  <div id="conversations" class="conversations" role="list"></div>
+ </aside>
+ <section class="chat">
+  <header class="chat-head"><div id="contactPhoto" class="avatar">◉</div>
+   <div><strong id="contactTitle">Selecione uma conversa</strong><div id="contactJid" class="small"></div></div>
+   <button id="aiContact" hidden type="button">Autorizar IA</button>
+   <button id="openContactFolder" hidden>Arquivos do contato</button><button id="refreshPhoto" hidden>Atualizar foto</button>
+  </header>
+  <div id="messages" class="messages" role="log" aria-live="polite">
+   <div class="welcome">Primeiro conecte pelo QR Code. Depois envie um “oi” de outro telefone para testar o recebimento real.</div>
+  </div>
+  <section id="learnSuggestion" class="learning-suggestion" hidden>
+    <strong>Sugestão da IA — revise antes de enviar</strong>
+    <p class="small">Nada é enviado sem você clicar em Aprovar e enviar. Pode editar o texto.</p>
+    <textarea id="learnSuggestionText" rows="4" maxlength="3000" aria-label="Resposta sugerida editável"></textarea>
+    <div class="learning-actions">
+      <button id="learnSendSuggestion" type="button">Aprovar e enviar</button>
+      <button id="learnRejectSuggestion" type="button" class="secondary-action">Rejeitar</button>
+    </div>
+    <p id="learnSuggestionResult" class="small" role="status"></p>
+   </section>
+   <p id="learnSuggestionWait" class="learn-wait" hidden>Modo sugestão ativo. A resposta da IA aparece aqui para você aprovar.</p>
+  <div class="compose">
+   <form id="sendForm"><input id="messageInput" maxlength="65536" placeholder="Digite uma mensagem" disabled><button id="sendButton" disabled>Enviar</button></form>
+   <div class="attachments"><select id="attachmentType" disabled aria-label="Tipo de arquivo">
+    <option value="document" selected>Documento / qualquer arquivo</option><option value="image">Imagem / Foto</option><option value="video">Vídeo</option><option value="audio">Áudio</option>
+   </select><button id="sendFile" disabled>Enviar arquivo</button><span id="error" class="small" role="status"></span></div>
+   <div id="composerHint" class="small" aria-live="polite">Escolha um contato para escrever.</div>
+  </div>
+ </section>
+</main><script src="./ui.js"></script>
+</body></html>
