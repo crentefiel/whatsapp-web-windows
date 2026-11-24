@@ -279,3 +279,11 @@ test('notify muito antigo é bloqueado, append e histórico não disparam respos
   ai.stop();
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('trocar o modo cancela respostas pendentes sem travar o processo',()=>{
+ const ai=new AutoResponder({settings:{public:()=>({enabled:false,responseScope:'selected',allowedJids:[]})},
+  client:{},store:{},delayMs:5000});
+ ai.pending.set(JID,setTimeout(()=>{},60000));
+ ai.cancelPending();
+ assert.equal(ai.pending.size,0);
+});

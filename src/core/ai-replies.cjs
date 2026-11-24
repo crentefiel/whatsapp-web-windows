@@ -262,7 +262,8 @@ class AutoResponder{
   this.latestIncoming.delete(jid);
  }
  cancelPending(){
-  this.cancelPending();
+  for(const t of this.pending.values())clearTimeout(t);
+  this.pending.clear();
  }
  async reply(jid){
   if(!this.active||this.running.has(jid)||!this.allowed(jid))return;

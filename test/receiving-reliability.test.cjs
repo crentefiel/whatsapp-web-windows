@@ -18,6 +18,28 @@ async function withClient(fn){
  finally{store.close();await fs.rm(folder,{force:true,recursive:true});}
 }
 
+test('mídia com link expirado pede o arquivo de novo ao celular e salva sem erro',async()=>withClient(async({store,client})=>{
+ let downloads=0,refresh=0;
+ const sock={updateMediaMessage:async()=>{refresh++;return{message:{imageMessage:{mimetype:'image/jpeg',fileLength:4,url:'https://mmg.whatsapp.net/novo'}}};}};
+ client.downloadMedia=async raw=>{
+  downloads++;
+  if(!raw.message?.imageMessage?.url){
+   const err=Error('Failed to fetch stream from https://mmg.whatsapp.net/velho');
+   err.output={statusCode:404};
+   throw err;
+  }
+  return Buffer.from([9,9,9,9]);
+ };
+ const foto={key:{remoteJid:PN,id:'foto-exp',fromMe:false},
+  message:{imageMessage:{caption:'foto',mimetype:'image/jpeg',fileLength:4}},messageTimestamp:1795000001};
+ await client.ingest([foto],'tempo_real',sock);
+ assert.equal(refresh,1);
+ assert.equal(downloads,2);
+ assert.equal(client.status.mediaErrors,0);
+ assert.ok(store.messages(PN).find(m=>m.id==='foto-exp').media_id);
+ assert.equal(client.status.detail,'');
+}));
+
 test('salva textos de um lote mesmo se o download de imagem ficar bloqueado',async()=>withClient(async({folder,store,client,changes})=>{
  let release;
  const wait=new Promise(resolve=>{release=resolve;});

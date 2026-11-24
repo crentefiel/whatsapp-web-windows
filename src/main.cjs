@@ -14,7 +14,7 @@ let window=null,store=null,client=null,aiSettings=null,aiResponder=null,learning
 // Evita janela de erro para falhas de rede comuns do undici/Baileys (download de mídia abortado).
 process.on('uncaughtException',(err)=>{
   const msg=String(err?.message||err||'').toLowerCase();
-  if(msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')){
+  if(msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')||msg.includes('failed to fetch')||msg.includes('econnreset')||msg.includes('socket hang up')){
     console.warn('[rede] Conexão de mídia interrompida (ignorada):',err.message);
     return;
   }
@@ -25,7 +25,7 @@ process.on('uncaughtException',(err)=>{
 });
 process.on('unhandledRejection',(reason)=>{
   const msg=String(reason?.message||reason||'').toLowerCase();
-  if(msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')){
+  if(msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')||msg.includes('failed to fetch')||msg.includes('econnreset')||msg.includes('socket hang up')){
     console.warn('[rede] Promise de rede rejeitada (ignorada):',reason);
     return;
   }

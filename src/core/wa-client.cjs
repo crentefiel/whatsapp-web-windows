@@ -102,12 +102,31 @@ class WhatsAppClient{
     if(!isAllowedJid(jid)||!id)return undefined;
     return this.recentMessages.get(jid+'|'+id)||this.store.messageContent?.(key);
   }
+  httpStatus(err){
+    const code=Number(err?.status??err?.statusCode??err?.output?.statusCode);
+    return Number.isInteger(code)?code:0;
+  }
   isNetworkAbort(err){
     const msg=String(err?.message||err||'').toLowerCase();
-    return msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')||msg.includes('socket')||msg.includes('econnreset')||msg.includes('timeout');
+    const status=this.httpStatus(err);
+    return msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')||msg.includes('failed to fetch')||msg.includes('socket')||msg.includes('econnreset')||msg.includes('etimedout')||msg.includes('timeout')||msg.includes('eai_again')||[408,429,500,502,503,504].includes(status);
+  }
+  async refreshMedia(raw,sock){
+    if(typeof sock?.updateMediaMessage!=='function')return raw;
+    let settled=false;
+    const updated=await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{if(!settled){settled=true;reject(Error('Tempo esgotado ao pedir a mídia novamente ao celular'));}},12000);
+      Promise.resolve(sock.updateMediaMessage(raw)).then(value=>{
+        if(settled)return;settled=true;clearTimeout(timer);resolve(value);
+      },error=>{
+        if(settled)return;settled=true;clearTimeout(timer);reject(error);
+      });
+    });
+    if(updated?.message)raw.message=updated.message;
+    return raw;
   }
   async downloadWithRetry(downloader,raw,sock,attempts=3){
-    let lastErr;
+    let lastErr,refreshed=false;
     for(let i=0;i<attempts;i++){
       try{
         const buffer=await downloader(raw,sock);
@@ -115,6 +134,13 @@ class WhatsAppClient{
         throw Error('Download não retornou bytes');
       }catch(e){
         lastErr=e;
+        const status=this.httpStatus(e);
+        // Baileys só pede o arquivo de novo se error.status existir. O Boom usa output.statusCode.
+        if(!refreshed&&sock?.updateMediaMessage&&[403,404,410].includes(status)){
+          refreshed=true;
+          raw=await this.refreshMedia(raw,sock);
+          continue;
+        }
         if(!this.isNetworkAbort(e)||i===attempts-1)throw e;
         await new Promise(r=>setTimeout(r,800*(i+1)));
       }
@@ -169,10 +195,12 @@ class WhatsAppClient{
     this.changed('status');
     for(const {raw,m} of pendingMedia){
       try{
-        const b=await import('@whiskeysockets/baileys');
-        const downloader=this.downloadMedia||((msg,client)=>b.downloadMediaMessage(msg,'buffer',{},{
-          logger:this.logger,reuploadRequest:client?.updateMediaMessage
-        }));
+        const downloader=this.downloadMedia||(async(msg,client)=>{
+          const b=await import('@whiskeysockets/baileys');
+          return b.downloadMediaMessage(msg,'buffer',{},{
+            logger:this.logger,reuploadRequest:client?.updateMediaMessage
+          });
+        });
         const buffer=await this.downloadWithRetry(downloader,raw,sock);
         if(buffer.length>MEDIA_LIMIT)throw Error('Mídia excede 100 MB');
         if(this.store.linkedMedia(m))continue;
@@ -188,7 +216,13 @@ class WhatsAppClient{
         }
       }catch(e){
         this.status.mediaErrors++;
-        this.reportError('download_midia',e);
+        const status=this.httpStatus(e);
+        const friendly=status===404||status===410
+          ?'mídia antiga indisponível no WhatsApp (o celular não reenviou o arquivo)'
+          :this.isNetworkAbort(e)
+            ?'conexão interrompida ao baixar mídia; o texto da conversa foi salvo'
+            :String(e?.message||e).replace(/https?:\/\/\S+/g,'').slice(0,140);
+        this.reportError('download_midia',{message:friendly});
       }
     }
   }
