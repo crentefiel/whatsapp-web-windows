@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-web-windows",
-  "version": "0.1.0",
-  "description": "Aplicativo Windows para acessar o WhatsApp Web oficial, sem IA",
+  "version": "0.2.0",
+  "description": "Aplicativo Windows para WhatsApp Web oficial com modo observador de IA (aprende com suas respostas)",
   "private": true,
   "main": "src/main.cjs",
   "author": "Grafica do Sorriso",
