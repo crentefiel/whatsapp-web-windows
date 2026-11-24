@@ -35,6 +35,14 @@ aside{position:relative}
 #aiContact.approved{background:#08796a;color:#fff}
 @media(max-width:1050px){.chat-head{gap:6px;padding:12px}.chat-head button{padding:8px;font-size:11px!important}}
 
+.learning-banner{
+  padding:8px 16px;font-size:12px;background:#1a3a32;color:#a8e6cf;border-bottom:1px solid #264a40;
+  text-align:center;letter-spacing:.2px
+}
+.learning-banner.mode-observation{background:#1a3a32;color:#a8e6cf}
+.learning-banner.mode-suggestion{background:#3a2e1a;color:#f0d8a0}
+.learning-banner.mode-automatic{background:#1a2a3a;color:#a0d0f0}
+
 .learning-settings{border-top:1px solid #28434a;display:flex;flex-direction:column;gap:9px}
 .learning-label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#c9d8de}
 .learning-settings select,.learning-settings textarea,.learning-examples textarea,.learning-suggestion textarea{
