@@ -10,6 +10,28 @@ const {hasSavedBaileysSession}=require('./core/session.cjs');
 const {resolveStoredMedia,contactFolder}=require('./core/media-files.cjs');
 protocol.registerSchemesAsPrivileged([{scheme:'sorriso',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 let window=null,store=null,client=null,aiSettings=null,aiResponder=null,learning=null;
+
+// Evita janela de erro para falhas de rede comuns do undici/Baileys (download de mídia abortado).
+process.on('uncaughtException',(err)=>{
+  const msg=String(err?.message||err||'').toLowerCase();
+  if(msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')){
+    console.warn('[rede] Conexão de mídia interrompida (ignorada):',err.message);
+    return;
+  }
+  console.error('Uncaught Exception:',err);
+  if(window&&!window.isDestroyed()){
+    dialog.showErrorBox('Erro inesperado',String(err.message||err).slice(0,300));
+  }
+});
+process.on('unhandledRejection',(reason)=>{
+  const msg=String(reason?.message||reason||'').toLowerCase();
+  if(msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')){
+    console.warn('[rede] Promise de rede rejeitada (ignorada):',reason);
+    return;
+  }
+  console.error('Unhandled Rejection:',reason);
+});
+
 if(!app.requestSingleInstanceLock())app.quit();
 else{
  app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
@@ -96,8 +118,6 @@ async function startApp(){
    if(!isAllowedJid(jid)||typeof answer!=='string'||!answer.trim()||answer.length>3000)throw Error('Resposta inválida');
    const pending=learning.suggestion(jid);
    if(!pending||pending.id!==id)throw Error('Sugestão não está mais disponível');
-   // Bloqueia a sugestão enquanto a mensagem está sendo enviada.
-   // A própria mensagem enviada é observada como intervenção humana.
    learning.beginSuggestion(id,jid);
    try{
      const sent=await client.sendText(jid,answer.trim(),'human');
@@ -106,7 +126,6 @@ async function startApp(){
    }catch(e){learning.cancelSuggestionSend(id,jid);throw e;}
  });
  api('whatsapp:copyDiagnostics',()=>{
-   // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
    const {qr,...diagnostics}=client.status;
    const {enabled,allowedJids,responseScope}=aiSettings.public();
    const {sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}=aiResponder.stats;
@@ -163,8 +182,6 @@ async function startApp(){
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  window.webContents.on('will-navigate',(event,url)=>{if(url!=='sorriso://local/index.html')event.preventDefault();});
  await window.loadURL('sorriso://local/index.html');
- // Na reabertura, retomar a sessão Baileys já autorizada, sem novo QR.
- // Se for a primeira instalação, o pareamento continua manual pelo botão.
  if(hasSavedBaileysSession(dataDir)){
    void client.start().catch(err=>{
      console.error('Falha ao retomar sessão Baileys:',err.message);
