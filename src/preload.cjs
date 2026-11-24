@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('whatsapp',Object.freeze({
  learnMode:mode=>call('learnMode',mode),
  learnRebuild:()=>call('learnRebuild'),
  learnExamples:jid=>call('learnExamples',jid),
+ learnExamplesPage:(jid,page)=>call('learnExamplesPage',jid,page),
+ learnRepair:()=>call('learnRepair'),
  learnExampleUpdate:(id,reply,status)=>call('learnExampleUpdate',id,reply,status),
  learnRules:jid=>call('learnRules',jid),
  learnAddRule:(text,jid)=>call('learnAddRule',text,jid),
@@ -23,6 +25,10 @@ contextBridge.exposeInMainWorld('whatsapp',Object.freeze({
  learnSuggestion:jid=>call('learnSuggestion',jid),
  learnRejectSuggestion:(id,jid)=>call('learnRejectSuggestion',id,jid),
  learnSendSuggestion:(id,jid,answer)=>call('learnSendSuggestion',id,jid,answer),
+ companyGet:()=>call('companyGet'),
+ companySave:input=>call('companySave',input),
+ companyPull:()=>call('companyPull'),
+ forgetChats:jids=>call('forgetChats',jids),
  onChange:callback=>{
    if(typeof callback!=='function')return()=>{};
    const listener=(_event,kind)=>callback(kind);ipcRenderer.on('dados:alterados',listener);

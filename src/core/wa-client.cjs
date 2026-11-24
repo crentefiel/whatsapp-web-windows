@@ -106,6 +106,10 @@ class WhatsAppClient{
     const code=Number(err?.status??err?.statusCode??err?.output?.statusCode);
     return Number.isInteger(code)?code:0;
   }
+  isDecryptFail(err){
+    const msg=String(err?.message||err||'').toLowerCase();
+    return msg.includes('bad_decrypt')||msg.includes('bad decrypt')||msg.includes('failed to decrypt')||msg.includes('openssl');
+  }
   isNetworkAbort(err){
     const msg=String(err?.message||err||'').toLowerCase();
     const status=this.httpStatus(err);
@@ -136,9 +140,9 @@ class WhatsAppClient{
         lastErr=e;
         const status=this.httpStatus(e);
         // Baileys só pede o arquivo de novo se error.status existir. O Boom usa output.statusCode.
-        if(!refreshed&&sock?.updateMediaMessage&&[403,404,410].includes(status)){
+        if(!refreshed&&sock?.updateMediaMessage&&([403,404,410].includes(status)||this.isDecryptFail(e))){
           refreshed=true;
-          raw=await this.refreshMedia(raw,sock);
+          try{raw=await this.refreshMedia(raw,sock);}catch(refreshErr){lastErr=refreshErr;}
           continue;
         }
         if(!this.isNetworkAbort(e)||i===attempts-1)throw e;
@@ -217,12 +221,15 @@ class WhatsAppClient{
       }catch(e){
         this.status.mediaErrors++;
         const status=this.httpStatus(e);
-        const friendly=status===404||status===410
+        const friendly=this.isDecryptFail(e)
+          ?'mídia antiga não abriu (o celular não reenviou a chave). Peça o arquivo de novo se precisar.'
+          :status===404||status===410
           ?'mídia antiga indisponível no WhatsApp (o celular não reenviou o arquivo)'
           :this.isNetworkAbort(e)
             ?'conexão interrompida ao baixar mídia; o texto da conversa foi salvo'
             :String(e?.message||e).replace(/https?:\/\/\S+/g,'').slice(0,140);
-        this.reportError('download_midia',{message:friendly});
+        this.status.lastMediaNote=friendly;
+        this.changed('status');
       }
     }
   }
@@ -262,6 +269,47 @@ class WhatsAppClient{
       }catch(e){this.reportError('salvar_anexo_enviado',e);}
     }
     return{id:sent?.key?.id||''};
+  }
+  async businessSnapshot(){
+    if(!this.socket||this.status.state!=='conectado')throw Error('Conecte o WhatsApp para buscar os dados da empresa');
+    const sock=this.socket;
+    const rawId=sock.user?.id||'';
+    const user=String(rawId).split('@')[0].split(':')[0];
+    const jid=user?user+'@s.whatsapp.net':'';
+    if(!jid)throw Error('Número ainda não identificado. Aguarde a conexão terminar.');
+    const out={name:'',about:'',hours:'',address:'',catalog:''};
+    let profile=null;
+    if(typeof sock.getBusinessProfile==='function'){
+      try{profile=await sock.getBusinessProfile(jid);}catch{profile=null;}
+    }
+    if(profile){
+      const sites=Array.isArray(profile.website)?profile.website.join(', '):'';
+      out.about=[profile.description,profile.category,profile.email,sites].filter(Boolean).join('\n');
+      out.address=String(profile.address||'');
+      const hours=profile.business_hours?.business_config;
+      if(Array.isArray(hours)&&hours.length){
+        out.hours=hours.map(item=>{
+          const day=item.day_of_week||item.day||'';
+          const open=item.open_time??item.open,close=item.close_time??item.close;
+          return [day,open!=null&&close!=null?open+'-'+close:item.mode].filter(Boolean).join(' ');
+        }).join('\n');
+      }
+    }
+    if(typeof sock.getCatalog==='function'){
+      try{
+        const cat=await sock.getCatalog({jid,limit:40});
+        const products=cat?.products||[];
+        out.catalog=products.map(product=>{
+          const amount=Number(product.priceAmount1000||product.price||0);
+          const price=amount>0?(product.priceAmount1000?'R$ '+(amount/1000).toFixed(2).replace('.',','):String(product.price)):'';
+          return [product.name,price,product.description].filter(Boolean).join(' — ');
+        }).filter(Boolean).join('\n');
+      }catch{/* número pessoal não tem catálogo */}
+    }
+    if(!out.about&&!out.hours&&!out.address&&!out.catalog){
+      throw Error('Este número não devolveu perfil comercial nem catálogo. Preencha os dados da empresa à mão.');
+    }
+    return out;
   }
   async profile(jid){
     if(!isAllowedJid(jid)||!this.socket||this.status.state!=='conectado')return null;

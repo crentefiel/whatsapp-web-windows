@@ -225,20 +225,23 @@ class AutoResponder{
   const last=this.latestIncoming.get(jid);
   const memory=this.learning?.context(jid,last?.text||'')||null;
   const humanExamples=memory?.examples?.slice(0,4).map(x=>
-   'Cliente: '+x.question.slice(0,500)+'\\nAtendente humano: '+x.reply.slice(0,900)).join('\\n\\n')||'';
-  const verifiedRules=memory?.rules?.map(x=>x.content.slice(0,500)).join('\\n')||'';
-  const additional=memory?[
+   'Cliente: '+x.question.slice(0,500)+'\nAtendente humano: '+x.reply.slice(0,900)).join('\n\n')||'';
+  const verifiedRules=memory?.rules?.map(x=>x.content.slice(0,500)).join('\n')||'';
+  const company=this.learning?.companyBrief?.()||'';
+  const additional=[
+   company?'Informações oficiais da empresa. Use somente estes fatos; não invente preço, prazo ou produto fora daqui:\n'+company:'',
    'Consulte a memória do atendimento deste MESMO cliente. Exemplos observados mostram estilo, não comprovam preços nem políticas atuais.',
-   memory.globalStyle||'',
-   verifiedRules?'Regras aprovadas pelo proprietário:\\n'+verifiedRules:'',
-   humanExamples?'Exemplos de perguntas e respostas humanas deste cliente:\\n'+humanExamples:'',
+   memory?.globalStyle||'',
+   verifiedRules?'Regras aprovadas pelo proprietário:\n'+verifiedRules:'',
+   humanExamples?'Exemplos de perguntas e respostas humanas deste cliente:\n'+humanExamples:'',
    'Nunca invente preços, prazos ou medidas. Se faltar uma regra oficial, peça confirmação humana.'
-  ].filter(Boolean).join('\\n\\n'):'';
-  const history=this.store.messages(jid,12).filter(m=>m.kind==='text'&&m.body).map(m=>({
-   role:m.from_me?'assistant':'user',content:String(m.body).slice(0,1800)
+  ].filter(Boolean).join('\n\n');
+  const history=this.store.messages(jid,16).filter(m=>m.body&&!['protocol','reaction'].includes(m.kind)).map(m=>({
+   role:m.from_me?'assistant':'user',
+   content:(m.kind==='text'||!m.kind?String(m.body):'['+m.kind+'] '+m.body).slice(0,1800)
   }));
   if(!history.some(m=>m.role==='user'))return '';
-  return this.chatRequest(config,[{role:'system',content:config.systemPrompt+(additional?'\\n\\n'+additional:'')},...history]);
+  return this.chatRequest(config,[{role:'system',content:config.systemPrompt+(additional?'\n\n'+additional:'')},...history]);
  }
  async suggest(jid){
   if(!this.active||!this.learning||this.learning.mode()!=='suggestion'||this.running.has(jid)||this.learning.humanHold(jid))return;
@@ -293,8 +296,11 @@ class AutoResponder{
     // Valor observado em uma conversa não vira preço oficial automaticamente.
     if(hasPrice(answer)){
      const amounts=pricesIn(answer);
-     const official=this.learning.context(jid,latest?.text||'').rules
-       .filter(r=>r.state==='approved').flatMap(r=>pricesIn(r.content));
+     const official=[
+       ...this.learning.context(jid,latest?.text||'').rules
+         .filter(r=>r.state==='approved').flatMap(r=>pricesIn(r.content)),
+       ...pricesIn(this.learning.companyBrief?.()||'')
+     ];
      if(!amounts.length||!amounts.every(value=>official.includes(value))){
        this.skip('Preço não aprovado; aguardando atendimento humano');return;
      }

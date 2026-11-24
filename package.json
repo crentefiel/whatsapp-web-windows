@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-web-windows",
-  "version": "0.4.2-beta.1",
+  "version": "0.4.3-beta.1",
   "description": "WhatsApp Desktop independente com Baileys, histórico SQLite, aprendizado por observação e IA",
   "private": true,
   "main": "src/main.cjs",

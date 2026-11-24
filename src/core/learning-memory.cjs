@@ -15,6 +15,13 @@ function similarity(a,b){
  let hits=0;for(const token of x)if(y.has(token))hits++;
  return hits/Math.max(x.size,y.size);
 }
+function describeInbound(row){
+ const body=String(row?.body||'').trim();
+ if(!row||row.kind==='protocol'||row.kind==='reaction')return '';
+ if(row.kind==='text'||!row.kind)return body;
+ const label={image:'imagem',video:'vídeo',audio:'áudio',document:'documento',sticker:'figurinha'}[row.kind]||row.kind;
+ return body?`[${label}] ${body}`:`[${label} do cliente]`;
+}
 function hasPrice(text){return /\bR\$\s*\d|\b\d+(?:[.,]\d+)?\s*(?:reais|real)\b/i.test(text);}
 class LearningMemory{
  constructor(store,changed=()=>{}){
@@ -40,7 +47,16 @@ class LearningMemory{
    CREATE TABLE IF NOT EXISTS learning_bot_messages(
     jid TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(jid,id));
    CREATE TABLE IF NOT EXISTS learning_human_hold(
-    jid TEXT PRIMARY KEY,until_ms INTEGER NOT NULL);`);
+    jid TEXT PRIMARY KEY,until_ms INTEGER NOT NULL);
+   CREATE TABLE IF NOT EXISTS company_profile(
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    name TEXT NOT NULL DEFAULT '',
+    about TEXT NOT NULL DEFAULT '',
+    hours TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    catalog TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL DEFAULT 0);
+   INSERT OR IGNORE INTO company_profile(id) VALUES(1);`);
   this.getModeStmt=this.db.prepare('SELECT mode FROM learning_state WHERE id=1');
  }
  mode(){return this.getModeStmt.get()?.mode||'observation';}
@@ -61,21 +77,38 @@ class LearningMemory{
   this.db.prepare("UPDATE learning_suggestions SET status='stale' WHERE jid=? AND status='pending'").run(this.jid(jid));
   this.changed('learning');
  }
+ // Junta o que o cliente falou desde a sua resposta anterior (texto, legenda ou tipo da mídia).
+ customerTurn(jid,replyAt){
+  const prev=this.db.prepare(`SELECT MAX(timestamp) AS t FROM messages
+    WHERE jid=? AND from_me=1 AND timestamp<?`).get(jid,replyAt)?.t||0;
+  const start=Math.max(Number(prev)||0,replyAt-30*MINUTE);
+  const rows=this.db.prepare(`SELECT id,kind,body FROM messages
+    WHERE jid=? AND from_me=0 AND timestamp<=? AND timestamp>?
+     AND kind NOT IN('protocol','reaction')
+    ORDER BY timestamp ASC,id ASC LIMIT 12`).all(jid,replyAt,start);
+  const parts=[];
+  let lastId=null;
+  for(const row of rows){
+    const line=describeInbound(row);
+    if(!line)continue;
+    parts.push(line);
+    lastId=row.id;
+  }
+  const text=parts.join('\n').slice(0,2000);
+  return text?{id:lastId,text}:null;
+ }
  recordHuman(m,source='tempo_real'){
   if(!m?.fromMe||m.type!=='text'||!m.text?.trim()||!isAllowedJid(m.jid)||source==='historico')return false;
   const jid=this.jid(m.jid);
   if(this.isBot(jid,m.id)||/^🤖\s/.test(m.text))return false;
   this.pauseForHuman(jid);
-  // A resposta feita no WhatsApp Web/celular/desktop vira exemplo do atendimento humano.
-  const question=this.db.prepare(`SELECT id,body,timestamp FROM messages
-   WHERE jid=? AND from_me=0 AND kind='text' AND body<>'' AND timestamp<=?
-   AND timestamp>=? ORDER BY timestamp DESC,id DESC LIMIT 1`)
-   .get(jid,m.timestamp,m.timestamp-30*MINUTE);
-  if(!question)return false;
+  // A fala inteira do cliente desde a resposta anterior, inclusive áudio e legenda.
+  const turn=this.customerTurn(jid,m.timestamp);
+  if(!turn?.text)return false;
   const result=this.db.prepare(`INSERT OR IGNORE INTO learning_examples
    (jid,question_id,reply_id,question,reply,reply_at,status,source)
    VALUES(?,?,?,?,?,?,'observed',?)`)
-   .run(jid,question.id,m.id,question.body.slice(0,2000),m.text.slice(0,LIMIT_REPLY),m.timestamp,source);
+   .run(jid,turn.id,m.id,turn.text.slice(0,2000),m.text.slice(0,LIMIT_REPLY),m.timestamp,source);
   if(result.changes)this.changed('learning');
   return result.changes>0;
  }
@@ -90,17 +123,24 @@ class LearningMemory{
        AND q.kind='text' AND q.body<>'' AND q.timestamp<=a.timestamp
        AND q.timestamp>=a.timestamp-1800000 ORDER BY q.timestamp DESC,q.id DESC LIMIT 1),
       a.id,
-      (SELECT q.body FROM messages q WHERE q.jid=a.jid AND q.from_me=0
-       AND q.kind='text' AND q.body<>'' AND q.timestamp<=a.timestamp
-       AND q.timestamp>=a.timestamp-1800000 ORDER BY q.timestamp DESC,q.id DESC LIMIT 1),
+      (SELECT CASE
+         WHEN q.kind='text' THEN q.body
+         WHEN q.body<>'' THEN '['||q.kind||'] '||q.body
+         ELSE '['||q.kind||' do cliente]'
+       END FROM messages q WHERE q.jid=a.jid AND q.from_me=0
+       AND q.kind NOT IN('protocol','reaction')
+       AND q.timestamp<=a.timestamp AND q.timestamp>=a.timestamp-1800000
+       AND (q.kind<>'text' OR q.body<>'')
+       ORDER BY q.timestamp DESC,q.id DESC LIMIT 1),
       substr(a.body,1,3000),a.timestamp,'observed','historico_local'
    FROM messages a WHERE a.from_me=1 AND a.kind='text' AND a.body<>''
     AND a.body NOT LIKE '🤖 %'
     AND (a.jid GLOB '*@s.whatsapp.net' OR a.jid GLOB '*@lid')
     AND NOT EXISTS(SELECT 1 FROM learning_bot_messages b WHERE b.jid=a.jid AND b.id=a.id)
     AND EXISTS(SELECT 1 FROM messages q WHERE q.jid=a.jid AND q.from_me=0
-      AND q.kind='text' AND q.body<>'' AND q.timestamp<=a.timestamp
-      AND q.timestamp>=a.timestamp-1800000)`).run();
+      AND q.kind NOT IN('protocol','reaction')
+      AND q.timestamp<=a.timestamp AND q.timestamp>=a.timestamp-1800000
+      AND (q.kind<>'text' OR q.body<>''))`).run();
   const after=this.db.prepare('SELECT COUNT(*) AS n FROM learning_examples').get().n;
   this.changed('learning');
   return{imported:after-before,total:after};
@@ -108,6 +148,71 @@ class LearningMemory{
  examples(jid,limit=40){
   return this.db.prepare(`SELECT id,jid,question,reply,reply_at,status,source FROM learning_examples
     WHERE jid=? ORDER BY reply_at DESC,id DESC LIMIT ?`).all(this.jid(jid),Math.min(100,Math.max(1,limit)));
+ }
+ examplesPage(jid,page=1){
+  jid=this.jid(jid);
+  const size=8;
+  const total=this.db.prepare('SELECT COUNT(*) AS n FROM learning_examples WHERE jid=?').get(jid).n;
+  const pages=Math.max(1,Math.ceil(total/size)||1);
+  const current=Math.min(pages,Math.max(1,Math.floor(Number(page))||1));
+  const items=this.db.prepare(`SELECT id,jid,question,reply,reply_at,status,source FROM learning_examples
+    WHERE jid=? ORDER BY reply_at DESC,id DESC LIMIT ? OFFSET ?`).all(jid,size,(current-1)*size);
+  return{items,total,page:current,pages,size};
+ }
+ repairQuestions(){
+  const rows=this.db.prepare(`SELECT id,jid,reply_at,question FROM learning_examples WHERE status='observed'`).all();
+  const update=this.db.prepare(`UPDATE learning_examples SET question=? WHERE id=? AND status='observed'`);
+  let updated=0;
+  for(const row of rows){
+   const turn=this.customerTurn(row.jid,row.reply_at);
+   if(turn?.text&&turn.text!==row.question){update.run(turn.text,row.id);updated++;}
+  }
+  if(updated)this.changed('learning');
+  return{updated,checked:rows.length};
+ }
+ forgetContacts(jids){
+  if(!Array.isArray(jids)||!jids.length||jids.length>500)throw Error('Selecione as conversas para apagar');
+  const unique=[];
+  for(const raw of jids){
+   const jid=this.jid(raw);
+   if(!unique.includes(jid))unique.push(jid);
+  }
+  const tables=['learning_examples','learning_suggestions','learning_human_hold','learning_bot_messages','learning_rules'];
+  let removed=0;
+  this.db.exec('BEGIN');
+  try{
+   for(const jid of unique){
+    for(const table of tables)removed+=this.db.prepare(`DELETE FROM ${table} WHERE jid=?`).run(jid).changes;
+   }
+   this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+  this.changed('learning');
+  return{removed,contacts:unique.length};
+ }
+ company(){
+  return this.db.prepare('SELECT name,about,hours,address,catalog,updated_at FROM company_profile WHERE id=1').get()
+   ||{name:'',about:'',hours:'',address:'',catalog:'',updated_at:0};
+ }
+ saveCompany(input={}){
+  const clip=(value,max)=>typeof value==='string'?value.trim().slice(0,max):'';
+  const row={
+   name:clip(input.name,120),about:clip(input.about,2000),hours:clip(input.hours,500),
+   address:clip(input.address,500),catalog:clip(input.catalog,8000)
+  };
+  this.db.prepare(`UPDATE company_profile SET name=?,about=?,hours=?,address=?,catalog=?,updated_at=? WHERE id=1`)
+   .run(row.name,row.about,row.hours,row.address,row.catalog,Date.now());
+  this.changed('learning');
+  return this.company();
+ }
+ companyBrief(){
+  const c=this.company();
+  const lines=[];
+  if(c.name)lines.push('Nome: '+c.name);
+  if(c.about)lines.push('Sobre: '+c.about);
+  if(c.hours)lines.push('Horário: '+c.hours);
+  if(c.address)lines.push('Endereço: '+c.address);
+  if(c.catalog)lines.push('Catálogo e preços informados pelo proprietário:\n'+c.catalog);
+  return lines.join('\n');
  }
  sampleUpdate(id,{reply,status}){
   if(!Number.isInteger(id)||id<=0||!['approved','rejected','observed'].includes(status)||typeof reply!=='string'||!reply.trim()||reply.length>LIMIT_REPLY)throw Error('Correção de exemplo inválida');

@@ -234,3 +234,72 @@ test('enviar sugestão aprovada não falha quando o próprio envio ativa pausa h
   assert.equal(row.answer,'Resposta revisada');
  }finally{x.close();}
 });
+
+test('a fala recente do cliente, inclusive áudio, entra no lugar de um número antigo',()=>{
+ const x=createCase();try{
+  const t=Date.now()-5*60000;
+  x.store.save(m(A,'velho',false,'4547',t));
+  x.store.save(m(A,'antes',true,'já respondi isso',t+1000));
+  x.store.save({...m(A,'voz',false,'',t+60000),type:'audio'});
+  const human=m(A,'espera',true,'Como eu falei, eu vou lhe esperar',t+70000);
+  x.store.save(human);
+  assert.equal(x.learning.recordHuman(human,'tempo_real'),true);
+  const learned=x.learning.examples(A)[0];
+  assert.equal(learned.question,'[áudio do cliente]');
+  assert.equal(learned.reply,'Como eu falei, eu vou lhe esperar');
+  x.learning.db.prepare(`UPDATE learning_examples SET question='4547',status='observed' WHERE id=?`).run(learned.id);
+  const fixed=x.learning.repairQuestions();
+  assert.equal(fixed.updated,1);
+  assert.equal(x.learning.examples(A)[0].question,'[áudio do cliente]');
+ }finally{x.close();}
+});
+
+test('apagar um cliente tira a memória dele e preserva os outros e a regra da empresa',()=>{
+ const x=createCase();try{
+  seed(x.store,A);seed(x.store,B);x.learning.rebuild();
+  const global=Number(x.learning.addRule('Fechamos aos domingos'));
+  const local=Number(x.learning.addRule('Este cliente pede boleto',A));
+  const memory=x.learning.forgetContacts([A]);
+  assert.ok(memory.removed>=1);
+  assert.equal(x.learning.examples(A).length,0);
+  assert.equal(x.learning.examples(B).length,1);
+  const left=x.learning.rules(B).map(r=>r.id);
+  assert.ok(left.includes(global));
+  assert.equal(left.includes(local),false);
+  const chats=x.store.forgetChats([A]);
+  assert.ok(chats.messages>=1);
+  assert.equal(x.store.messages(A).length,0);
+  assert.equal(x.store.messages(B).length,2);
+ }finally{x.close();}
+});
+
+test('cadastro da empresa vira fato oficial e o preço do catálogo pode ser dito',async()=>{
+ const x=createCase();try{
+  const t=Date.now()-60000;
+  x.store.save(m(A,'q',false,'Quanto custa o milheiro de cartões?',t));
+  x.store.save(m(A,'a',true,'Vou confirmar o valor do milheiro de cartões.',t+1000));
+  x.learning.rebuild();
+  x.learning.saveCompany({name:'Gráfica do Sorriso',catalog:'1000 cartões — R$ 90,00',hours:'8h às 18h'});
+  assert.match(x.learning.companyBrief(),/Gráfica do Sorriso/);
+  assert.match(x.learning.companyBrief(),/R\$ 90,00/);
+  const page=x.learning.examplesPage(A,1);
+  assert.equal(page.total,1);
+  assert.equal(page.items[0].reply.includes('milheiro'),true);
+  x.learning.setMode('automatic');
+  const settings=new AiSettings(x.dir,vault);
+  settings.update({baseUrl:'http://localhost:11434/v1',model:'modelo',responseScope:'all',enabled:true});
+  const sent=[];let reply='O milheiro fica R$ 90,00.';
+  const ai=new AutoResponder({settings,client:{status:{state:'conectado'},sendText:async(...args)=>sent.push(args)},
+   store:x.store,learning:x.learning,delayMs:1,fetchImpl:async()=>({ok:true,
+    text:async()=>JSON.stringify({choices:[{message:{content:reply}}]})})});
+  ai.handleIncoming(m(A,'pede-preco',false,'Quanto custa o milheiro de cartões?'),'tempo_real');
+  await wait(90);
+  assert.equal(sent.length,1,'preço escrito no cadastro da empresa pode ser informado');
+  reply='Custa R$ 120,00.';
+  ai.lastSent.clear();
+  ai.handleIncoming(m(A,'preco-inventado',false,'Quanto custa o milheiro de cartões?'),'tempo_real');
+  await wait(70);
+  assert.equal(sent.length,1,'preço que não está no cadastro continua bloqueado');
+  ai.stop();
+ }finally{x.close();}
+});

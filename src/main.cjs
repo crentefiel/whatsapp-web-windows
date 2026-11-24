@@ -107,6 +107,8 @@ async function startApp(){
  });
  api('whatsapp:learnRebuild',()=>learning.rebuild());
  api('whatsapp:learnExamples',jid=>learning.examples(jid));
+ api('whatsapp:learnExamplesPage',(jid,page)=>learning.examplesPage(jid,page));
+ api('whatsapp:learnRepair',()=>learning.repairQuestions());
  api('whatsapp:learnExampleUpdate',(id,reply,status)=>learning.sampleUpdate(id,{reply,status}));
  api('whatsapp:learnRules',jid=>learning.rules(jid||null));
  api('whatsapp:learnAddRule',(text,jid)=>Number(learning.addRule(text,jid||null)));
@@ -124,6 +126,33 @@ async function startApp(){
      learning.finishSuggestion(id,jid,answer.trim(),'approved');
      changed('learning');return sent;
    }catch(e){learning.cancelSuggestionSend(id,jid);throw e;}
+ });
+ api('whatsapp:companyGet',()=>learning.company());
+ api('whatsapp:companySave',input=>learning.saveCompany(input||{}));
+ api('whatsapp:companyPull',async()=>{
+  const snap=await client.businessSnapshot();
+  const current=learning.company();
+  const pick=key=>String(snap[key]||'').trim()?snap[key]:current[key];
+  return learning.saveCompany({
+   name:pick('name')||current.name,about:pick('about'),hours:pick('hours'),
+   address:pick('address'),catalog:pick('catalog')
+  });
+ });
+ api('whatsapp:forgetChats',async jids=>{
+  if(!Array.isArray(jids)||!jids.length)throw Error('Selecione ao menos uma conversa');
+  const clean=jids.filter(isAllowedJid);
+  if(!clean.length)throw Error('Nenhuma conversa válida');
+  const choice=await dialog.showMessageBox(window,{
+   type:'warning',title:'Apagar conversas neste programa',
+   message:'Apagar '+clean.length+' conversa(s) e a memória desses clientes?',
+   detail:'Some da lista deste computador, como se fossem clientes novos. A IA esquece os exemplos deles. Isso não apaga a conversa no celular do cliente.',
+   buttons:['Cancelar','Apagar daqui'],defaultId:0,cancelId:0,noLink:true
+  });
+  if(choice.response!==1)return{canceled:true};
+  const memory=learning.forgetContacts(clean);
+  const chats=store.forgetChats(clean);
+  changed('conversas');changed('learning');
+  return{canceled:false,...chats,memoryRemoved:memory.removed};
  });
  api('whatsapp:copyDiagnostics',()=>{
    const {qr,...diagnostics}=client.status;
@@ -188,4 +217,5 @@ async function startApp(){
      client.reportError('retomar_sessao',err);
    });
  }
+ setTimeout(()=>{try{learning.repairQuestions();}catch(err){console.error('Falha ao reorganizar a memória:',err.message);}},2000);
 }
