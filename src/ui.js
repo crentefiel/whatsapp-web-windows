@@ -9,7 +9,19 @@ const learningLabels={
  suggestion:'Sugestão: a IA prepara uma resposta editável. Só envia depois da sua aprovação.',
  automatic:'Automático: a IA responde somente com evidências humanas semelhantes e regras aprovadas.'
 };
+const bannerLabels={
+ observation:'Modo: Observação · Aprendendo com suas respostas',
+ suggestion:'Modo: Sugestão · Preparando respostas para você aprovar',
+ automatic:'Modo: Automático · Respondendo com base no aprendizado'
+};
 function learningStatus(message){$('learnResult').textContent=message||'';}
+function updateLearningBanner(data){
+ const banner=$('learningBanner');
+ if(!banner)return;
+ const modeLabel=bannerLabels[data.mode]||'Modo de aprendizado';
+ banner.textContent=modeLabel+' · '+data.examples+' exemplos aprendidos';
+ banner.className='learning-banner mode-'+data.mode;
+}
 async function loadLearningOverview(){
  if(typeof window.whatsapp.learnStats!=='function')return;
  const data=await window.whatsapp.learnStats();
@@ -19,6 +31,7 @@ async function loadLearningOverview(){
  $('learnStats').textContent='Exemplos observados: '+data.examples+
   ' · Aprovados: '+data.approved+' · Clientes na memória: '+data.contacts+
   ' · Regras aprovadas: '+data.approvedRules;
+ updateLearningBanner(data);
 }
 function smallDiv(className,content){
  const node=document.createElement('div');node.className=className;node.textContent=content;
@@ -227,6 +240,7 @@ async function reload(kind){
      pendingStatus=false;pendingConversations=false;
      if(needConversations){await conversations();await messages();}
      await status();
+     await loadLearningOverview().catch(()=>{});
    }
  }finally{reloading=false;}
 }
@@ -314,7 +328,6 @@ $('aiForm').addEventListener('submit',async event=>{
   refreshAiScope();
   refreshAiContact();
  }catch(e){
-  // Preserve os valores digitados e a seleção, permitindo corrigir sem recomeçar.
   $('aiResult').textContent='Não foi possível salvar: '+e.message;
  }finally{saveButton.disabled=false;}
 });
@@ -349,31 +362,43 @@ $('aiContact').addEventListener('click',async()=>{
  }catch(e){error(e.message);}
 });
 $('search').addEventListener('input',renderChats);
-$('messageInput').addEventListener('input',refreshComposer);
-$('refreshPhoto').addEventListener('click',async()=>{if(!selected)return;try{const url=await window.whatsapp.profile(selected);photo(selected,url);}catch(e){error(e.message);}});
-$('openContactFolder').addEventListener('click',async()=>{if(!selected)return;try{await window.whatsapp.openContactFolder(selected);}catch(e){error(e.message);}});
 $('sendForm').addEventListener('submit',async e=>{
- e.preventDefault();const value=$('messageInput').value;if(!selected||!value.trim()||sendingText)return;
- if(currentState!=='conectado'){error('Aguarde o WhatsApp reconectar para enviar.');return;}
- sendingText=true;refreshComposer();error('');
- try{await window.whatsapp.sendText(selected,value);$('messageInput').value='';await reload('conversas');}
- catch(err){error(err.message);}finally{sendingText=false;await status();}
+ e.preventDefault();
+ if(!selected||sendingText)return;
+ const text=$('messageInput').value.trim();
+ if(!text)return;
+ sendingText=true;refreshComposer();
+ try{
+  await window.whatsapp.sendText(selected,text);
+  $('messageInput').value='';
+  await reload('conversas');
+ }catch(err){error(err.message);}
+ finally{sendingText=false;refreshComposer();}
 });
+$('messageInput').addEventListener('input',refreshComposer);
 $('sendFile').addEventListener('click',async()=>{
  if(!selected||sendingFile)return;
- if(currentState!=='conectado'){error('Aguarde o WhatsApp reconectar para enviar arquivos.');return;}
- sendingFile=true;refreshComposer();error('');
- try{await window.whatsapp.sendFile(selected,$('attachmentType').value,'');await reload('conversas');}
- catch(e){error(e.message);}finally{sendingFile=false;await status();}
+ sendingFile=true;refreshComposer();
+ try{
+  const result=await window.whatsapp.sendFile(selected,$('attachmentType').value,'');
+  if(!result?.canceled)await reload('conversas');
+ }catch(e){error(e.message);}
+ finally{sendingFile=false;refreshComposer();}
 });
-window.whatsapp.onChange(kind=>{
- if(kind==='learning'){
-  void loadLearningOverview().then(()=>loadLearningDetails()).catch(learningError);return;
- }
- if(kind==='ai'){return;} // Não sobrescrever campos ainda não salvos enquanto o usuário edita.
- reload(kind).catch(e=>error(e.message));
+$('refreshPhoto').addEventListener('click',async()=>{
+ if(!selected)return;
+ try{const url=await window.whatsapp.profile(selected);if(url)photo(selected,url);}
+ catch(e){error(e.message);}
 });
-refreshComposer();
-void loadLearningOverview().then(()=>loadLearningDetails()).catch(learningError);
-void loadAi();
-reload('conversas').catch(e=>error(e.message));
+$('openContactFolder').addEventListener('click',async()=>{
+ if(!selected)return;
+ try{await window.whatsapp.openContactFolder(selected);}
+ catch(e){error(e.message);}
+});
+window.whatsapp.onDadosAlterados(kind=>{
+ if(kind==='status'||kind==='learning'||kind==='ai')void reload(kind==='status'?'status':'conversas');
+ else void reload('conversas');
+});
+void status();
+void conversations();
+void loadLearningOverview().catch(()=>{});
