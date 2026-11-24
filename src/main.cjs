@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, session, ipcMain } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const {
@@ -10,11 +10,14 @@ const {
   cleanDownloadFilename,
   chromiumUserAgent,
 } = require('./security.cjs');
+const learningDb = require('./learning-db.cjs');
 
 const WINDOW_TITLE = 'WhatsApp Web — Gráfica do Sorriso';
 const SESSION_PARTITION = 'persist:whatsapp-grafica';
 let mainWindow = null;
+let learningWindow = null;
 let isQuitting = false;
+let currentMode = learningDb.getMode();
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -35,6 +38,13 @@ if (!app.requestSingleInstanceLock()) {
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => { isQuitting = true; });
+
+// IPC para o visualizador de aprendizado
+ipcMain.handle('learning:getData', () => ({
+  mode: learningDb.getMode(),
+  stats: learningDb.getStats(),
+  examples: learningDb.getExamples(200),
+}));
 
 function getBoundsPath() {
   return path.join(app.getPath('userData'), 'window.json');
@@ -66,7 +76,6 @@ function saveWindowBounds(window) {
 }
 
 function configureSession(waSession) {
-  // Usa a identificação de Chromium. Não intercepta nem lê mensagens.
   waSession.setUserAgent(chromiumUserAgent(waSession.getUserAgent()));
 
   waSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
@@ -115,6 +124,51 @@ function configureSession(waSession) {
   });
 }
 
+function injectObserver(window) {
+  const injectPath = path.join(__dirname, 'observer-inject.js');
+  try {
+    const code = fs.readFileSync(injectPath, 'utf8');
+    window.webContents.executeJavaScript(code).catch(err => {
+      console.warn('Falha ao injetar observador:', err.message);
+    });
+  } catch (err) {
+    console.warn('Não foi possível ler script de observação:', err.message);
+  }
+}
+
+function openLearningViewer() {
+  if (learningWindow && !learningWindow.isDestroyed()) {
+    learningWindow.focus();
+    return;
+  }
+
+  learningWindow = new BrowserWindow({
+    width: 720,
+    height: 640,
+    title: 'Aprendizado da IA',
+    backgroundColor: '#111b21',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'learning-preload.cjs'),
+    },
+  });
+
+  learningWindow.loadFile(path.join(__dirname, 'learning-viewer.html'));
+  learningWindow.on('closed', () => { learningWindow = null; });
+}
+
+function setMode(mode) {
+  currentMode = learningDb.setMode(mode);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setTitle(`${WINDOW_TITLE} [${modeLabel(currentMode)}]`);
+  }
+}
+
+function modeLabel(mode) {
+  return { observer: 'Observador', auto: 'IA Automática', approval: 'IA com Aprovação' }[mode] || mode;
+}
+
 function installMenu(window) {
   const menu = Menu.buildFromTemplate([
     {
@@ -126,6 +180,31 @@ function installMenu(window) {
         { label: 'Abrir pasta Downloads', click: () => shell.openPath(app.getPath('downloads')) },
         { type: 'separator' },
         { role: 'quit', label: 'Sair' },
+      ],
+    },
+    {
+      label: 'Modo IA',
+      submenu: [
+        {
+          label: 'Observador (aprender)',
+          type: 'radio',
+          checked: currentMode === 'observer',
+          click: () => setMode('observer'),
+        },
+        {
+          label: 'IA responde sozinha',
+          type: 'radio',
+          checked: currentMode === 'auto',
+          click: () => setMode('auto'),
+        },
+        {
+          label: 'IA responde com aprovação',
+          type: 'radio',
+          checked: currentMode === 'approval',
+          click: () => setMode('approval'),
+        },
+        { type: 'separator' },
+        { label: 'Ver aprendizado da IA', click: openLearningViewer },
       ],
     },
     {
@@ -147,7 +226,7 @@ function installMenu(window) {
             type: 'info',
             title: 'Sobre',
             message: 'WhatsApp Web — Gráfica do Sorriso',
-            detail: 'Aplicativo independente que abre o WhatsApp Web oficial. Não afiliado à WhatsApp LLC ou Meta. Sem IA nesta fase.',
+            detail: 'Aplicativo independente. Modo Observador ativo por padrão.\nA IA observa suas respostas para aprender o seu estilo.\nNão afiliado à WhatsApp LLC ou Meta.',
           }),
         },
       ],
@@ -182,6 +261,45 @@ function configureWindowSecurity(window) {
       detail: 'Verifique a internet e selecione WhatsApp > Recarregar.',
     }).catch(() => {});
   });
+
+  // Recebe exemplos de aprendizado do script injetado
+  window.webContents.on('console-message', () => {});
+  window.webContents.executeJavaScript(`
+    window.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'IA_LEARNING_EXAMPLE') {
+        // será capturado pelo preload ou via ipc
+      }
+    });
+  `).catch(() => {});
+}
+
+// Listener global para mensagens do script injetado (via executeJavaScript + postMessage não atravessa facilmente,
+// então usamos um canal simples via console ou melhoramos depois)
+function setupLearningBridge(window) {
+  window.webContents.on('did-finish-load', () => {
+    injectObserver(window);
+    // Ponte simples: o script usa postMessage, capturamos via executeJavaScript periódico ou melhoramos
+    // Por enquanto, expomos uma função global que o script pode chamar se necessário
+    window.webContents.executeJavaScript(`
+      window.__sendLearningExample = (data) => {
+        console.log('LEARNING_EXAMPLE:' + JSON.stringify(data));
+      };
+    `).catch(() => {});
+  });
+
+  window.webContents.on('console-message', (_event, _level, message) => {
+    if (typeof message === 'string' && message.startsWith('LEARNING_EXAMPLE:')) {
+      try {
+        const data = JSON.parse(message.slice('LEARNING_EXAMPLE:'.length));
+        if (data.incomingText && data.userReply) {
+          learningDb.addExample(data.incomingText, data.userReply, data.chatName);
+          console.log('[Aprendizado] Exemplo salvo:', data.incomingText.slice(0, 30));
+        }
+      } catch (e) {
+        console.warn('Falha ao processar exemplo:', e.message);
+      }
+    }
+  });
 }
 
 async function launch() {
@@ -193,7 +311,7 @@ async function launch() {
     ...loadWindowBounds(),
     minWidth: 900,
     minHeight: 650,
-    title: WINDOW_TITLE,
+    title: `${WINDOW_TITLE} [${modeLabel(currentMode)}]`,
     backgroundColor: '#111b21',
     show: false,
     autoHideMenuBar: false,
@@ -211,6 +329,7 @@ async function launch() {
 
   configureWindowSecurity(mainWindow);
   installMenu(mainWindow);
+  setupLearningBridge(mainWindow);
 
   mainWindow.once('ready-to-show', () => {
     if (!isQuitting && mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
