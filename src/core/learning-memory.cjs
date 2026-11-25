@@ -23,6 +23,18 @@ function describeInbound(row){
  return body?`[${label}] ${body}`:`[${label} do cliente]`;
 }
 function hasPrice(text){return /\bR\$\s*\d|\b\d+(?:[.,]\d+)?\s*(?:reais|real)\b/i.test(text);}
+function asksForHuman(text){
+ const s=String(text||'').toLocaleLowerCase('pt-BR');
+ if(/\b(apaga|apagar|exclui|excluir|deleta|deletar|esquece|esquecer|remove|remover)\b[\s\S]{0,40}\b(meus dados|minhas mensagens|minha conversa|meu n[uú]mero)\b/.test(s))return 'dados';
+ if(/\b(quero|preciso)\s+(falar|conversar)\s+com\b/.test(s))return 'pessoa';
+ if(/\bfalar\s+com\s+(uma\s+)?(pessoa|atendente|humano|gente|algu[eé]m|o\s+dono|o\s+respons[aá]vel)\b/.test(s))return 'pessoa';
+ if(/\b(chama|chame|passa|passe)\s+(para|pra)\s+(uma\s+pessoa|um\s+atendente|um\s+humano|algu[eé]m)\b/.test(s))return 'pessoa';
+ if(/\bn[aã]o\s+quero\s+(falar\s+com\s+)?(um\s+)?(rob[oô]|bot|m[aá]quina)\b/.test(s))return 'pessoa';
+ if(/\b(atendente|pessoa)\s+(de\s+verdade|humano|real)\b/.test(s))return 'pessoa';
+ if(/\b(quero|vim)\s+reclamar\b/.test(s))return 'pessoa';
+ if(/\batendimento\s+humano\b/.test(s))return 'pessoa';
+ return '';
+}
 class LearningMemory{
  constructor(store,changed=()=>{}){
   this.store=store;this.db=store.db;this.changed=changed;
@@ -47,7 +59,8 @@ class LearningMemory{
    CREATE TABLE IF NOT EXISTS learning_bot_messages(
     jid TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(jid,id));
    CREATE TABLE IF NOT EXISTS learning_human_hold(
-    jid TEXT PRIMARY KEY,until_ms INTEGER NOT NULL);
+    jid TEXT PRIMARY KEY,until_ms INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'timer',note TEXT NOT NULL DEFAULT '');
    CREATE TABLE IF NOT EXISTS company_profile(
     id INTEGER PRIMARY KEY CHECK(id=1),
     name TEXT NOT NULL DEFAULT '',
@@ -57,6 +70,9 @@ class LearningMemory{
     catalog TEXT NOT NULL DEFAULT '',
     updated_at INTEGER NOT NULL DEFAULT 0);
    INSERT OR IGNORE INTO company_profile(id) VALUES(1);`);
+  const holdCols=this.db.prepare('PRAGMA table_info(learning_human_hold)').all().map(c=>c.name);
+  if(!holdCols.includes('kind'))this.db.exec("ALTER TABLE learning_human_hold ADD COLUMN kind TEXT NOT NULL DEFAULT 'timer'");
+  if(!holdCols.includes('note'))this.db.exec("ALTER TABLE learning_human_hold ADD COLUMN note TEXT NOT NULL DEFAULT ''");
   this.getModeStmt=this.db.prepare('SELECT mode FROM learning_state WHERE id=1');
  }
  mode(){return this.getModeStmt.get()?.mode||'observation';}
@@ -72,10 +88,38 @@ class LearningMemory{
   this.db.prepare('INSERT OR IGNORE INTO learning_bot_messages(jid,id) VALUES(?,?)').run(this.jid(jid),id);
  }
  humanHold(jid){return (this.db.prepare('SELECT until_ms FROM learning_human_hold WHERE jid=?').get(this.jid(jid))?.until_ms||0)>Date.now();}
+ holdInfo(jid){
+  const row=this.db.prepare('SELECT until_ms,kind,note FROM learning_human_hold WHERE jid=?').get(this.jid(jid));
+  if(!row||row.until_ms<=Date.now())return{active:false,manual:false,note:''};
+  return{active:true,manual:row.kind==='manual',note:row.note||'',until:row.until_ms};
+ }
+ heldJids(){
+  return this.db.prepare("SELECT jid FROM learning_human_hold WHERE until_ms>? AND kind='manual'").all(Date.now()).map(row=>row.jid);
+ }
  pauseForHuman(jid,ms=10*MINUTE){
-  this.db.prepare('INSERT INTO learning_human_hold(jid,until_ms) VALUES(?,?) ON CONFLICT(jid) DO UPDATE SET until_ms=excluded.until_ms').run(this.jid(jid),Date.now()+ms);
-  this.db.prepare("UPDATE learning_suggestions SET status='stale' WHERE jid=? AND status='pending'").run(this.jid(jid));
+  jid=this.jid(jid);
+  const current=this.holdInfo(jid);
+  this.db.prepare("UPDATE learning_suggestions SET status='stale' WHERE jid=? AND status='pending'").run(jid);
+  if(!(current.active&&current.manual)){
+   this.db.prepare(`INSERT INTO learning_human_hold(jid,until_ms,kind,note) VALUES(?,?,'timer','')
+     ON CONFLICT(jid) DO UPDATE SET until_ms=excluded.until_ms,kind='timer',note=''`).run(jid,Date.now()+ms);
+  }
   this.changed('learning');
+ }
+ holdManual(jid,note='manual'){
+  jid=this.jid(jid);
+  const label=['pessoa','dados','preco','manual'].includes(note)?note:'manual';
+  const until=Date.now()+365*24*60*60*1000;
+  this.db.prepare(`INSERT INTO learning_human_hold(jid,until_ms,kind,note) VALUES(?,?,'manual',?)
+    ON CONFLICT(jid) DO UPDATE SET until_ms=excluded.until_ms,kind='manual',note=excluded.note`).run(jid,until,label);
+  this.db.prepare("UPDATE learning_suggestions SET status='stale' WHERE jid=? AND status IN('pending','sending')").run(jid);
+  this.changed('learning');
+  return this.holdInfo(jid);
+ }
+ releaseHold(jid){
+  this.db.prepare('DELETE FROM learning_human_hold WHERE jid=?').run(this.jid(jid));
+  this.changed('learning');
+  return{active:false,manual:false,note:''};
  }
  // Junta o que o cliente falou desde a sua resposta anterior (texto, legenda ou tipo da mídia).
  customerTurn(jid,replyAt){
@@ -332,4 +376,4 @@ class LearningMemory{
   return{mode:this.mode(),examples:q,approved,approvedRules:rules,contacts};
  }
 }
-module.exports={LearningMemory,similarity,hasPrice,MODES};
+module.exports={LearningMemory,similarity,hasPrice,asksForHuman,MODES};

@@ -6,6 +6,7 @@ let aiConfig={enabled:false,allowedJids:[],hasKey:false,responseScope:'selected'
 let learningMode='observation',currentSuggestion=null,learnPage=1,settingsTab='whatsapp',picking=false;
 const picked=new Set();
 const pickedExamples=new Set();
+const heldJids=new Set();
 const learningLabels={
  observation:'Observação: a IA aprende com suas respostas humanas, mas não sugere nem envia mensagens.',
  suggestion:'Sugestão: a IA prepara uma resposta editável. Só envia depois da sua aprovação.',
@@ -301,6 +302,8 @@ function clearOpenChat(){
  $('contactTitle').textContent='Selecione uma conversa';
  $('contactJid').textContent='';
  $('refreshPhoto').hidden=true;$('openContactFolder').hidden=true;
+ const hold=$('humanHold');if(hold)hold.hidden=true;
+ const holdNote=$('humanHoldNote');if(holdNote)holdNote.hidden=true;
  $('learnSuggestion').hidden=true;
  const wait=$('learnSuggestionWait');if(wait)wait.hidden=true;
  $('messages').replaceChildren();
@@ -310,7 +313,7 @@ function renderChats(){
  const filtered=visibleChats();
  $('conversations').replaceChildren(...filtered.map(c=>{
    const el=document.createElement('div');
-   el.className='person'+(selected===c.jid?' selected':'')+(picking&&picked.has(c.jid)?' picked':'');
+   el.className='person'+(selected===c.jid?' selected':'')+(picking&&picked.has(c.jid)?' picked':'')+(heldJids.has(c.jid)?' needs-human':'');
    el.setAttribute('role','listitem');
    if(picking){
      const box=document.createElement('input');
@@ -327,6 +330,10 @@ function renderChats(){
    const label=document.createElement('strong');label.textContent=c.name||readable(c.jid);
    const prev=document.createElement('div');prev.className='preview';prev.textContent=c.preview||('['+(c.preview_kind||'Conversa')+']');
    el.append(label,prev);
+   if(heldJids.has(c.jid)){
+    const flag=document.createElement('em');flag.className='hold-flag';flag.textContent='Você atende';
+    el.append(flag);
+   }
    el.addEventListener('click',()=>{
      if(picking){
        if(picked.has(c.jid))picked.delete(c.jid);else picked.add(c.jid);
@@ -338,10 +345,44 @@ function renderChats(){
  }));
  refreshChatTools();
 }
-async function conversations(){try{chats=await window.whatsapp.conversations();renderChats();}catch(e){error(e.message);}}
+async function refreshHeld(){
+ if(typeof window.whatsapp.learnHeld!=='function')return;
+ const rows=await window.whatsapp.learnHeld();
+ heldJids.clear();
+ for(const jid of rows||[])heldJids.add(jid);
+}
+const holdNotes={
+ pessoa:'Este cliente pediu para falar com você. A IA parou nesta conversa.',
+ dados:'Este cliente pediu para apagar os dados. A IA parou. Nada foi apagado.',
+ preco:'A IA não tinha esse preço. Avisou que você confirma e parou nesta conversa.',
+ manual:'Você está atendendo. A IA não responde até você devolver.'
+};
+async function loadHumanHold(){
+ const btn=$('humanHold'),note=$('humanHoldNote');
+ if(!btn)return;
+ if(!selected||typeof window.whatsapp.learnHold!=='function'){
+  btn.hidden=true;if(note)note.hidden=true;return;
+ }
+ const info=await window.whatsapp.learnHold(selected);
+ btn.hidden=false;
+ btn.textContent=info?.active?'Devolver para a IA':'Estou atendendo';
+ btn.className=info?.active?'approved':'';
+ if(!note)return;
+ if(!info?.active){note.hidden=true;return;}
+ note.hidden=false;
+ note.textContent=info.manual?(holdNotes[info.note]||holdNotes.manual):'A IA pausou porque você respondeu. Ela volta sozinha, ou clique em Devolver para a IA.';
+}
+async function conversations(){
+ try{
+  chats=await window.whatsapp.conversations();
+  await refreshHeld().catch(()=>{});
+  renderChats();
+ }catch(e){error(e.message);}
+}
 async function choose(c){
  selected=c.jid;learnPage=1;pickedExamples.clear();$('contactTitle').textContent=c.name||readable(c.jid);$('contactJid').textContent=c.jid;
  $('refreshPhoto').hidden=false;$('openContactFolder').hidden=false;photo(c.jid,c.photo);renderChats();refreshComposer();refreshAiContact();await messages();await status();
+ void loadHumanHold().catch(()=>{});
  void loadLearningDetails().catch(learningError);
 }
 function mediaElement(m){
@@ -636,8 +677,22 @@ $('sendFile').addEventListener('click',async()=>{
  try{await window.whatsapp.sendFile(selected,$('attachmentType').value,'');await reload('conversas');}
  catch(e){error(e.message);}finally{sendingFile=false;await status();}
 });
+$('humanHold').addEventListener('click',async()=>{
+ if(!selected)return;
+ if(typeof window.whatsapp.learnTake!=='function'||typeof window.whatsapp.learnRelease!=='function')return;
+ try{
+  const info=typeof window.whatsapp.learnHold==='function'?await window.whatsapp.learnHold(selected):null;
+  if(info?.active)await window.whatsapp.learnRelease(selected);
+  else await window.whatsapp.learnTake(selected);
+  await loadHumanHold();
+  await refreshHeld();
+  renderChats();
+ }catch(e){error(e);}
+});
 window.whatsapp.onChange(kind=>{
  if(kind==='learning'){
+  void loadHumanHold().catch(()=>{});
+  void refreshHeld().then(()=>renderChats()).catch(()=>{});
   void loadLearningOverview().then(()=>loadLearningDetails()).catch(learningError);return;
  }
  if(kind==='ai'){return;} // Não sobrescrever campos ainda não salvos enquanto o usuário edita.

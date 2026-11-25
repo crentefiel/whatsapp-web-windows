@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const {isAllowedJid}=require('./messages.cjs');
-const {hasPrice}=require('./learning-memory.cjs');
+const {hasPrice,asksForHuman}=require('./learning-memory.cjs');
 
 const DEFAULTS=Object.freeze({
   enabled:false,
@@ -155,6 +155,12 @@ class AutoResponder{
    if(this.seenIncoming.has(key)){this.skip('Evento repetido');return;}
    this.seenIncoming.set(key,Date.now());
    while(this.seenIncoming.size>1000)this.seenIncoming.delete(this.seenIncoming.keys().next().value);
+  }
+  const pedido=asksForHuman(m.text);
+  if(pedido&&this.learning){
+   this.learning.holdManual(jid,pedido);
+   this.skip(pedido==='dados'?'Cliente pediu para apagar os dados':'Cliente pediu uma pessoa');
+   return;
   }
   const mode=this.learning?.mode()||'automatic';
   if(mode==='observation'){this.skip('Modo observação: sem resposta automática');return;}
@@ -314,7 +320,12 @@ class AutoResponder{
        ...pricesIn(this.learning.companyBrief?.()||'')
      ];
      if(!amounts.length||!amounts.every(value=>official.includes(value))){
-       this.skip('Preço não aprovado; aguardando atendimento humano');return;
+      await this.client.sendText(jid,'🤖 Vou confirmar esse valor com a gráfica e já te retorno.','ai');
+      this.learning.holdManual(jid,'preco');
+      this.lastSent.set(jid,Date.now());this.hourly.set(jid,[...valid,Date.now()]);
+      this.stats.sent++;this.stats.lastError='';
+      this.stats.lastSkip='Preço não aprovado; pedi confirmação humana';
+      return;
      }
     }
    }

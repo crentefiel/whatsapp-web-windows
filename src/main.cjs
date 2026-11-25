@@ -110,6 +110,10 @@ async function startApp(){
    aiResponder.cancelPending();
    return{canceled:false,mode:learning.setMode(mode)};
  });
+ api('whatsapp:learnHold',jid=>isAllowedJid(jid)?learning.holdInfo(jid):{active:false,manual:false,note:''});
+ api('whatsapp:learnHeld',()=>learning.heldJids());
+ api('whatsapp:learnTake',jid=>{if(!isAllowedJid(jid))throw Error('Contato inválido');return learning.holdManual(jid,'manual');});
+ api('whatsapp:learnRelease',jid=>{if(!isAllowedJid(jid))throw Error('Contato inválido');return learning.releaseHold(jid);});
  api('whatsapp:learnRebuild',()=>learning.rebuild());
  api('whatsapp:learnExamples',jid=>learning.examples(jid));
  api('whatsapp:learnExamplesPage',(jid,page)=>learning.examplesPage(jid,page));

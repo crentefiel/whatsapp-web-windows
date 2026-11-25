@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {Store}=require('../src/core/database.cjs');
-const {LearningMemory,similarity}=require('../src/core/learning-memory.cjs');
+const {LearningMemory,similarity,asksForHuman}=require('../src/core/learning-memory.cjs');
 const {AiSettings,AutoResponder}=require('../src/core/ai-replies.cjs');
 const A='5511999999999@s.whatsapp.net',B='5511888888888@s.whatsapp.net';
 const vault={isEncryptionAvailable:()=>true,encryptString:s=>Buffer.from(s),decryptString:b=>b.toString()};
@@ -157,7 +157,10 @@ test('modo Automático só envia com exemplo humano semelhante e não inventa pr
   ai.lastSent.clear();
   ai.handleIncoming(m(A,'preco',false,'Qual o horário de atendimento?'),'tempo_real');
   await wait(60);
-  assert.equal(sent.length,1,'preço observado mas não aprovado não pode ser anunciado');
+  assert.equal(sent.length,2);
+  assert.match(sent[1][1],/confirmar esse valor/);
+  assert.doesNotMatch(sent[1][1],/120/);
+  assert.equal(x.learning.holdInfo(A).note,'preco');
   ai.stop();
  }finally{x.close();}
 });
@@ -213,11 +216,16 @@ test('automático exige o valor EXATO de preço presente em regra aprovada, incl
   x.learning.approveRule(Number(rule),true);
   ai.handleIncoming(m(A,'preco-nao-igual',false,'Qual o horário de atendimento?'),'tempo_real');
   await wait(75);
-  assert.equal(sent.length,0,'não enviar preço diferente do preço oficial');
+  assert.equal(sent.length,1);
+  assert.match(sent[0][1],/confirmar esse valor/);
+  assert.equal(x.learning.holdInfo(A).manual,true);
+  x.learning.releaseHold(A);
+  ai.lastSent.clear();
   reply='O valor confirmado é 80 reais.';
   ai.handleIncoming(m(A,'preco-correspondente',false,'Qual o horário de atendimento?'),'tempo_real');
   await wait(75);
-  assert.equal(sent.length,1,'aceitar valor exatamente aprovado em formato equivalente');
+  assert.equal(sent.length,2,'aceitar valor exatamente aprovado em formato equivalente');
+  assert.match(sent[1][1],/80 reais/);
   ai.stop();
  }finally{x.close();}
 });
@@ -338,7 +346,34 @@ test('cadastro da empresa vira fato oficial e o preço do catálogo pode ser dit
   ai.lastSent.clear();
   ai.handleIncoming(m(A,'preco-inventado',false,'Quanto custa o milheiro de cartões?'),'tempo_real');
   await wait(70);
-  assert.equal(sent.length,1,'preço que não está no cadastro continua bloqueado');
+  assert.equal(sent.length,2);
+  assert.match(sent[1][1],/confirmar esse valor/);
+  assert.doesNotMatch(sent[1][1],/120/);
+  ai.stop();
+ }finally{x.close();}
+});
+
+test('pedido de pessoa ou de apagar dados para a IA sem chamar o modelo',async()=>{
+ const x=createCase();try{
+  assert.equal(asksForHuman('quero falar com uma pessoa'),'pessoa');
+  assert.equal(asksForHuman('pode apagar meus dados?'),'dados');
+  assert.equal(asksForHuman('preciso de 1000 cartões para uma pessoa'),'');
+  x.learning.setMode('automatic');
+  const settings=new AiSettings(x.dir,vault);
+  settings.update({baseUrl:'http://localhost:11434/v1',model:'modelo',responseScope:'all',enabled:true});
+  let calls=0;const sent=[];
+  const ai=new AutoResponder({settings,client:{status:{state:'conectado'},sendText:async(...args)=>sent.push(args)},
+   store:x.store,learning:x.learning,delayMs:1,fetchImpl:async()=>{calls++;return{ok:true,text:async()=>'{}'};}});
+  ai.handleIncoming(m(A,'pessoa',false,'Quero falar com um atendente'),'tempo_real');
+  await wait(40);
+  assert.equal(calls,0);
+  assert.equal(sent.length,0);
+  assert.equal(x.learning.holdInfo(A).note,'pessoa');
+  assert.deepEqual(x.learning.heldJids(),[A]);
+  x.learning.pauseForHuman(A);
+  assert.equal(x.learning.holdInfo(A).manual,true,'resposta humana não encurta a pausa pedida');
+  x.learning.releaseHold(A);
+  assert.equal(x.learning.holdInfo(A).active,false);
   ai.stop();
  }finally{x.close();}
 });

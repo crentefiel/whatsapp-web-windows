@@ -2,7 +2,7 @@
 
 Programa de Windows para atender o WhatsApp da gráfica. Conecta com Baileys (não abre o WhatsApp Web dentro do app), guarda o histórico neste computador e aprende com as respostas que você mesmo envia.
 
-Versão atual: **0.4.4-beta.1**. O modo inicial é **Observação**: a IA não envia mensagem sozinha.
+Versão atual: **0.4.5-beta.1**. O modo inicial é **Observação**: a IA não envia mensagem sozinha.
 
 ## Instalar
 
@@ -15,6 +15,7 @@ O instalador Windows (NSIS) sai pelo GitHub Actions neste repositório, na aba A
 - No modo **Sugestão**, o texto da IA fica fixo acima do campo de digitar, para você editar e clicar em **Aprovar e enviar**.
 - Dá para marcar conversas — o botão **Todos** pega a lista inteira, não só as que aparecem na tela — e apagar daqui. Isso tira a conversa e a memória desse cliente só neste computador. Não apaga no celular do cliente.
 - Na aba **Memória** dá para apagar exemplos marcados ou todos os exemplos do contato aberto. A IA deixa de usar o que foi apagado.
+- Na conversa, **Estou atendendo** faz a IA parar naquele contato até **Devolver para a IA**. Se o cliente pedir uma pessoa ou para apagar os dados, a IA para sozinha e avisa na tela. Nada é apagado sozinho.
 
 ## Modos da IA
 
@@ -22,11 +23,11 @@ O instalador Windows (NSIS) sai pelo GitHub Actions neste repositório, na aba A
 |---|---|
 | Observação | Padrão. Grava o que o cliente falou e o que você respondeu. Não chama a API para responder e não envia. |
 | Sugestão | Escreve um rascunho. Só sai depois de **Aprovar e enviar**. |
-| Automático | Depois de confirmar o aviso. Se o modelo e a chave já estiverem salvos, essa confirmação liga o envio. Responde com exemplos parecidos. Preço que não está numa regra aprovada ou no cadastro da empresa fica bloqueado. |
+| Automático | Depois de confirmar o aviso. Se o modelo e a chave já estiverem salvos, essa confirmação liga o envio. Responde com exemplos parecidos. Preço que não está numa regra aprovada ou no cadastro da empresa não é inventado: a IA avisa que você vai confirmar e para nessa conversa. |
 
 A API é qualquer uma compatível com OpenAI (`/v1`, sem `/chat/completions` na URL). A chave fica no computador. Nada disso entra no GitHub.
 
-Áudio sem texto entra na memória como `[áudio do cliente]`. O programa ainda não transcreve voz.
+Áudio sem texto entra na memória como `[áudio do cliente]`. Documento entra como documento. O programa ainda não lê áudio nem arquivo. Isso fica para uma versão seguinte.
 
 ## Empresa
 

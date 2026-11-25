@@ -41,8 +41,11 @@ body.settings-open #app{grid-template-columns:minmax(440px,520px) minmax(0,1fr)}
 .ai-actions{display:flex;flex-wrap:wrap;gap:8px}
 .ai-actions button{font-size:12px}
 .ai-actions .secondary-action{background:#36515d;color:#fff}
-#aiContact{background:#35565a;color:#fff;font-size:12px;white-space:nowrap}
-#aiContact.approved{background:#08796a;color:#fff}
+#aiContact,#humanHold{background:#35565a;color:#fff;font-size:12px;white-space:nowrap;flex:none}
+#aiContact.approved,#humanHold.approved{background:#08796a;color:#fff}
+.human-hold{margin:0;padding:10px 16px;background:#3a2e1a;color:#f0d8a0;border-top:1px solid #6a5428;font-size:13px;flex:none}
+.person.needs-human{box-shadow:inset 3px 0 0 #e0b050}
+.hold-flag{font-size:11px;color:#e0b050;font-style:normal}
 .ai-form textarea:focus,.learning-settings textarea:focus,.learning-examples textarea:focus,.learning-suggestion textarea:focus{min-height:160px}
 @media(max-width:1050px){
  .chat-head{gap:6px;padding:12px}

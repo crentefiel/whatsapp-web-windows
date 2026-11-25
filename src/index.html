@@ -148,11 +148,13 @@
   <header class="chat-head"><div id="contactPhoto" class="avatar">◉</div>
    <div><strong id="contactTitle">Selecione uma conversa</strong><div id="contactJid" class="small"></div></div>
    <button id="aiContact" hidden type="button">Autorizar IA</button>
+   <button id="humanHold" hidden type="button">Estou atendendo</button>
    <button id="openContactFolder" hidden>Arquivos do contato</button><button id="refreshPhoto" hidden>Atualizar foto</button>
   </header>
   <div id="messages" class="messages" role="log" aria-live="polite">
    <div class="welcome">Primeiro conecte pelo QR Code. Depois envie um “oi” de outro telefone para testar o recebimento real.</div>
   </div>
+  <p id="humanHoldNote" class="human-hold" hidden>A IA parou nesta conversa.</p>
   <section id="learnSuggestion" class="learning-suggestion" hidden>
     <strong>Sugestão da IA — revise antes de enviar</strong>
     <p class="small">Nada é enviado sem você clicar em Aprovar e enviar. Pode editar o texto.</p>
