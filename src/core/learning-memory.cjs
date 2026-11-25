@@ -4,6 +4,8 @@ const {isAllowedJid}=require('./messages.cjs');
 const MODES=Object.freeze(['observation','suggestion','automatic']);
 const LIMIT_REPLY=3000;
 const MINUTE=60000;
+const HOUR=60*MINUTE;
+const TURN_LOOKBACK=7*24*HOUR;
 function words(s){
  return new Set(String(s||'').toLocaleLowerCase('pt-BR')
    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
@@ -121,11 +123,12 @@ class LearningMemory{
   this.changed('learning');
   return{active:false,manual:false,note:''};
  }
- // Junta o que o cliente falou desde a sua resposta anterior (texto, legenda ou tipo da mídia).
+ // Junta o que o cliente falou desde a sua resposta anterior, até 7 dias.
+ // A gráfica responde horas depois; a janela de 30 minutos deixava a memória vazia.
  customerTurn(jid,replyAt){
   const prev=this.db.prepare(`SELECT MAX(timestamp) AS t FROM messages
     WHERE jid=? AND from_me=1 AND timestamp<?`).get(jid,replyAt)?.t||0;
-  const start=Math.max(Number(prev)||0,replyAt-30*MINUTE);
+  const start=Math.max(Number(prev)||0,replyAt-TURN_LOOKBACK);
   const rows=this.db.prepare(`SELECT id,kind,body FROM messages
     WHERE jid=? AND from_me=0 AND timestamp<=? AND timestamp>?
      AND kind NOT IN('protocol','reaction')
@@ -141,20 +144,68 @@ class LearningMemory{
   const text=parts.join('\n').slice(0,2000);
   return text?{id:lastId,text}:null;
  }
- recordHuman(m,source='tempo_real'){
-  if(!m?.fromMe||m.type!=='text'||!m.text?.trim()||!isAllowedJid(m.jid)||source==='historico')return false;
+ replyIsRecent(m){
+  return !Number.isFinite(m?.timestamp)||Date.now()-Number(m.timestamp)<HOUR;
+ }
+ // Grava o par pergunta/resposta. Não pausa a IA: duplicata e histórico antigo só aprendem.
+ captureReply(m,source='tempo_real'){
+  if(!m?.fromMe||m.type!=='text'||!String(m.text||'').trim()||!isAllowedJid(m.jid)||source==='historico')return false;
   const jid=this.jid(m.jid);
   if(this.isBot(jid,m.id)||/^🤖\s/.test(m.text))return false;
-  this.pauseForHuman(jid);
-  // A fala inteira do cliente desde a resposta anterior, inclusive áudio e legenda.
   const turn=this.customerTurn(jid,m.timestamp);
   if(!turn?.text)return false;
   const result=this.db.prepare(`INSERT OR IGNORE INTO learning_examples
    (jid,question_id,reply_id,question,reply,reply_at,status,source)
    VALUES(?,?,?,?,?,?,'observed',?)`)
-   .run(jid,turn.id,m.id,turn.text.slice(0,2000),m.text.slice(0,LIMIT_REPLY),m.timestamp,source);
+   .run(jid,turn.id,m.id,turn.text.slice(0,2000),String(m.text).slice(0,LIMIT_REPLY),m.timestamp,source);
   if(result.changes)this.changed('learning');
   return result.changes>0;
+ }
+ recordHuman(m,source='tempo_real'){
+  const saved=this.captureReply(m,source);
+  if(!m?.fromMe||m.type!=='text'||!String(m.text||'').trim()||!isAllowedJid(m.jid)||source==='historico')return saved;
+  if(this.isBot(m.jid,m.id)||/^🤖\s/.test(m.text))return false;
+  if(this.replyIsRecent(m))this.pauseForHuman(m.jid);
+  return saved;
+ }
+ // Quando o WhatsApp troca o LID pelo número, a memória vai junto.
+ // Não mexe nas mensagens: isso continua no Store, que não tem estas tabelas.
+ adoptJid(from,to,options={}){
+  if(!isAllowedJid(from)||!isAllowedJid(to)||from===to)return false;
+  if(!from.endsWith('@lid')||!to.endsWith('@s.whatsapp.net'))return false;
+  this.db.exec('BEGIN');
+  try{
+   this.db.prepare(`INSERT OR IGNORE INTO learning_examples
+     (jid,question_id,reply_id,question,reply,reply_at,status,source)
+     SELECT ?,question_id,reply_id,question,reply,reply_at,status,source
+     FROM learning_examples WHERE jid=?`).run(to,from);
+   this.db.prepare('DELETE FROM learning_examples WHERE jid=?').run(from);
+   this.db.prepare('UPDATE learning_suggestions SET jid=? WHERE jid=?').run(to,from);
+   const holds=this.db.prepare('SELECT until_ms,kind,note FROM learning_human_hold WHERE jid IN(?,?)').all(from,to);
+   if(holds.length){
+    const best=holds.reduce((a,b)=>b.until_ms>a.until_ms||(b.until_ms===a.until_ms&&b.kind==='manual')?b:a);
+    this.db.prepare('DELETE FROM learning_human_hold WHERE jid IN(?,?)').run(from,to);
+    this.db.prepare('INSERT INTO learning_human_hold(jid,until_ms,kind,note) VALUES(?,?,?,?)')
+     .run(to,best.until_ms,best.kind||'timer',best.note||'');
+   }
+   this.db.prepare('INSERT OR IGNORE INTO learning_bot_messages(jid,id) SELECT ?,id FROM learning_bot_messages WHERE jid=?').run(to,from);
+   this.db.prepare('DELETE FROM learning_bot_messages WHERE jid=?').run(from);
+   this.db.prepare('UPDATE learning_rules SET jid=? WHERE jid=?').run(to,from);
+   this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+  if(!options.silent)this.changed('learning');
+  return true;
+ }
+ adoptAliases(){
+  let rows=[];
+  try{rows=this.db.prepare('SELECT lid,pn FROM jid_aliases').all();}catch{return 0;}
+  let moved=0;
+  for(const row of rows){
+   const pending=this.db.prepare('SELECT COUNT(*) AS n FROM learning_examples WHERE jid=?').get(row.lid)?.n||0;
+   if(this.adoptJid(row.lid,row.pn,{silent:true})&&pending)moved+=pending;
+  }
+  if(moved)this.changed('learning');
+  return moved;
  }
  // Importa exemplos de TODO o histórico local que o Baileys já salvou.
  // Não envia dados à API nem promove hipóteses/preços para regras oficiais.
@@ -165,7 +216,7 @@ class LearningMemory{
    SELECT a.jid,
       (SELECT q.id FROM messages q WHERE q.jid=a.jid AND q.from_me=0
        AND q.kind='text' AND q.body<>'' AND q.timestamp<=a.timestamp
-       AND q.timestamp>=a.timestamp-1800000 ORDER BY q.timestamp DESC,q.id DESC LIMIT 1),
+       AND q.timestamp>=a.timestamp-${TURN_LOOKBACK} ORDER BY q.timestamp DESC,q.id DESC LIMIT 1),
       a.id,
       (SELECT CASE
          WHEN q.kind='text' THEN q.body
@@ -173,7 +224,7 @@ class LearningMemory{
          ELSE '['||q.kind||' do cliente]'
        END FROM messages q WHERE q.jid=a.jid AND q.from_me=0
        AND q.kind NOT IN('protocol','reaction')
-       AND q.timestamp<=a.timestamp AND q.timestamp>=a.timestamp-1800000
+       AND q.timestamp<=a.timestamp AND q.timestamp>=a.timestamp-${TURN_LOOKBACK}
        AND (q.kind<>'text' OR q.body<>'')
        ORDER BY q.timestamp DESC,q.id DESC LIMIT 1),
       substr(a.body,1,3000),a.timestamp,'observed','historico_local'
@@ -183,9 +234,10 @@ class LearningMemory{
     AND NOT EXISTS(SELECT 1 FROM learning_bot_messages b WHERE b.jid=a.jid AND b.id=a.id)
     AND EXISTS(SELECT 1 FROM messages q WHERE q.jid=a.jid AND q.from_me=0
       AND q.kind NOT IN('protocol','reaction')
-      AND q.timestamp<=a.timestamp AND q.timestamp>=a.timestamp-1800000
+      AND q.timestamp<=a.timestamp AND q.timestamp>=a.timestamp-${TURN_LOOKBACK}
       AND (q.kind<>'text' OR q.body<>''))`).run();
   const after=this.db.prepare('SELECT COUNT(*) AS n FROM learning_examples').get().n;
+  this.adoptAliases();
   this.changed('learning');
   return{imported:after-before,total:after};
  }

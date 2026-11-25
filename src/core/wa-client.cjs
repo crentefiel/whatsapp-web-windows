@@ -7,7 +7,7 @@ const {archiveBaileysSession}=require('./session.cjs');
 class WhatsAppClient{
   constructor({dataDir,store,changed}){
     this.dataDir=dataDir;this.store=store;this.changed=changed;this.socket=null;this.starting=false;this.closed=false;this.retryTimer=null;this.sessionExpired=false;this.recentMessages=new Map();this.aiNotified=new Set();
-    this.status={state:'desconectado',qr:null,lastEvent:null,lastSaved:null,lastIncoming:null,received:0,saved:0,upserts:0,upsertsNotify:0,upsertsAppend:0,upsertsOther:0,lastUpsertType:null,ignored:0,duplicates:0,errors:0,mediaErrors:0,detail:''};this.logger=null;
+    this.status={state:'desconectado',qr:null,lastEvent:null,lastSaved:null,lastIncoming:null,received:0,saved:0,upserts:0,upsertsNotify:0,upsertsAppend:0,upsertsOther:0,lastUpsertType:null,ignored:0,duplicates:0,errors:0,mediaErrors:0,detail:''};this.logger=null;this.memoryTimer=null;
   }
   update(patch){Object.assign(this.status,patch);this.changed('status');}
   async start(){
@@ -151,14 +151,32 @@ class WhatsAppClient{
     }
     throw lastErr;
   }
+  rememberLink(jid,altJid){
+    const pn=this.store.linkJids?.(jid,altJid);
+    if(!pn||!this.memory?.adoptJid)return pn||null;
+    const lid=String(jid).endsWith('@lid')?jid:altJid;
+    if(typeof lid==='string'&&lid.endsWith('@lid')&&lid!==pn){
+      try{this.memory.adoptJid(lid,pn);}catch(e){this.reportError('unir_memoria',e);}
+    }
+    return pn;
+  }
+  scheduleMemoryRebuild(){
+    if(!this.memory?.rebuild)return;
+    clearTimeout(this.memoryTimer);
+    this.memoryTimer=setTimeout(()=>{
+      this.memoryTimer=null;
+      try{this.memory.rebuild();this.memory.repairQuestions?.();}
+      catch(e){this.reportError('reorganizar_memoria',e);}
+    },2500);
+  }
   async ingest(messages,source,sock){
     let anySaved=false,ignored=0,duplicates=0;
-    const pendingMedia=[];
+    const pendingMedia=[],humanReplay=[];
     for(const raw of messages||[]){
       try{
         const m=normalizeMessage(raw);
         if(!m){ignored++;continue;}
-        if(m.altJid)this.store.linkJids?.(m.jid,m.altJid);
+        if(m.altJid)this.rememberLink(m.jid,m.altJid);
         if(this.store.resolveJid)m.jid=this.store.resolveJid(m.jid);
         this.remember(raw);
         const exists=this.store.has(m);
@@ -181,6 +199,9 @@ class WhatsAppClient{
             this.status.lastSaved=new Date().toISOString();
           }
         }
+        if(source!=='historico'&&m.fromMe&&m.type==='text'&&m.text){
+          humanReplay.push({jid:m.jid,id:m.id,fromMe:true,type:'text',text:m.text,timestamp:m.timestamp});
+        }
         if(source==='tempo_real'&&!m.fromMe&&m.type==='text'){
           const eventKey=m.jid+'|'+m.id+'|'+m.participant;
           if(!this.aiNotified.has(eventKey)){
@@ -195,6 +216,16 @@ class WhatsAppClient{
       }catch(e){this.reportError('gravar_mensagem_'+source,e);}
     }
     this.status.ignored+=ignored;this.status.duplicates+=duplicates;
+    if(source!=='historico'&&this.memory?.captureReply){
+      for(const item of humanReplay){
+        try{
+          const saved=this.memory.captureReply(item,source);
+          const recent=!Number.isFinite(item.timestamp)||Date.now()-item.timestamp<60*60*1000;
+          if(saved&&recent)this.memory.pauseForHuman(item.jid);
+        }catch(e){this.reportError('observacao_humana',e);}
+      }
+    }
+    if(source==='historico')this.scheduleMemoryRebuild();
     if(anySaved)this.changed('conversas');
     this.changed('status');
     for(const {raw,m} of pendingMedia){
@@ -255,7 +286,7 @@ class WhatsAppClient{
     const normalized=normalizeMessage(sent);
     if(normalized?.media&&normalized.id){
       try{
-        if(normalized.altJid)this.store.linkJids?.(normalized.jid,normalized.altJid);
+        if(normalized.altJid)this.rememberLink(normalized.jid,normalized.altJid);
         const resolved=this.store.resolveJid?.(normalized.jid)||normalized.jid;
         normalized.jid=resolved;
         const id=crypto.randomUUID(),filename=path.basename(filePath);

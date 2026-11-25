@@ -54,10 +54,11 @@ async function startApp(){
  client.memory=learning;
  client.onIncoming=(m,source)=>aiResponder.handleIncoming(m,source);
  client.onHuman=(m,source)=>{
-   if(source==='historico'||(Number.isFinite(m.timestamp)&&Date.now()-m.timestamp>60*60*1000))return;
+   if(source==='historico')return;
    if(learning.isBot(m.jid,m.id)||/^🤖\s/.test(m.text))return;
    learning.recordHuman(m,source);
-   aiResponder.handleHuman(m.jid);
+   const recent=!Number.isFinite(m.timestamp)||Date.now()-m.timestamp<=60*60*1000;
+   if(recent)aiResponder.handleHuman(m.jid);
  };
  protocol.handle('sorriso',async request=>{
    const url=new URL(request.url);if(url.host!=='local')return new Response('Not found',{status:404});
@@ -253,5 +254,8 @@ async function startApp(){
      client.reportError('retomar_sessao',err);
    });
  }
- setTimeout(()=>{try{learning.repairQuestions();}catch(err){console.error('Falha ao reorganizar a memória:',err.message);}},2000);
+ setTimeout(()=>{
+   try{learning.rebuild();learning.repairQuestions();}
+   catch(err){console.error('Falha ao reorganizar a memória:',err.message);}
+ },2000);
 }

@@ -377,3 +377,72 @@ test('pedido de pessoa ou de apagar dados para a IA sem chamar o modelo',async()
   ai.stop();
  }finally{x.close();}
 });
+
+test('resposta horas depois ainda grava a fala do cliente e não pausa sincronização antiga',()=>{
+ const x=createCase();try{
+  const replyAt=Date.now()-5*60*60*1000;
+  x.store.save(m(A,'mil',false,'Preciso de mil cartões',replyAt-60000));
+  const human=m(A,'tarde',true,'Pode deixar, qual o papel?',replyAt);
+  x.store.save(human);
+  assert.equal(x.learning.recordHuman(human,'sincronizacao'),true);
+  assert.equal(x.learning.examples(A)[0].question,'Preciso de mil cartões');
+  assert.equal(x.learning.humanHold(A),false,'resposta antiga não tira a conversa da IA');
+  x.learning.db.prepare('DELETE FROM learning_examples').run();
+  assert.equal(x.learning.rebuild().imported,1);
+  assert.equal(x.learning.examples(A)[0].question,'Preciso de mil cartões');
+  const old=Date.now()-8*24*60*60*1000;
+  x.store.save(m(B,'velha',false,'Quero um banner antigo',old));
+  const tooLate=m(B,'muito-tarde',true,'Ainda faço banner',Date.now());
+  x.store.save(tooLate);
+  assert.equal(x.learning.recordHuman(tooLate,'tempo_real'),false);
+  assert.equal(x.learning.examples(B).length,0);
+  assert.equal(x.learning.humanHold(B),true,'resposta de agora ainda pausa, mesmo sem par');
+ }finally{x.close();}
+});
+
+test('memória acompanha o número quando o WhatsApp une o LID',async()=>{
+ const x=createCase();try{
+  const lid='abc123def@lid';
+  const t=Date.now()-120000;
+  x.store.save(m(lid,'q',false,'Preciso de mil cartões',t));
+  const human=m(lid,'a',true,'Qual o papel?',t+1000);
+  x.store.save(human);
+  assert.equal(x.learning.recordHuman(human,'tempo_real'),true);
+  assert.equal(x.learning.db.prepare('SELECT COUNT(*) AS n FROM learning_examples WHERE jid=?').get(lid).n,1);
+  x.store.linkJids(lid,A);
+  x.learning.adoptJid(lid,A);
+  assert.equal(x.learning.db.prepare('SELECT COUNT(*) AS n FROM learning_examples WHERE jid=?').get(lid).n,0);
+  assert.equal(x.learning.examples(A).length,1);
+  assert.equal(x.learning.examples(A)[0].question,'Preciso de mil cartões');
+  assert.equal(x.learning.examples(lid).length,1,'o LID resolvido aponta para o número');
+ }finally{x.close();}
+});
+
+test('grava a resposta mesmo se ela chegou antes da fala do cliente ou só como duplicata do histórico',async()=>{
+ const x=createCase();
+ const {WhatsAppClient}=require('../src/core/wa-client.cjs');
+ const client=new WhatsAppClient({dataDir:x.dir,store:x.store,changed:()=>{}});
+ try{
+  client.memory=x.learning;
+  client.onHuman=(msg,source)=>x.learning.recordHuman(msg,source);
+  const now=Math.floor(Date.now()/1000);
+  const reply={key:{remoteJid:A,id:'resp-lote',fromMe:true},message:{conversation:'Pode deixar, qual o papel?'},messageTimestamp:now};
+  const ask={key:{remoteJid:A,id:'pede-lote',fromMe:false},message:{conversation:'Preciso de mil cartões'},messageTimestamp:now-20};
+  await client.ingest([reply,ask],'tempo_real',{});
+  assert.equal(x.learning.examples(A).length,1);
+  assert.equal(x.learning.examples(A)[0].question,'Preciso de mil cartões');
+  const old=now-5*60*60;
+  await client.ingest([
+   {key:{remoteJid:B,id:'q-hist',fromMe:false},message:{conversation:'Preciso de mil cartões'},messageTimestamp:old-60},
+   {key:{remoteJid:B,id:'a-hist',fromMe:true},message:{conversation:'Qual o papel?'},messageTimestamp:old}
+  ],'historico',{});
+  assert.equal(x.learning.examples(B).length,0,'histórico não pausa nem grava na hora');
+  assert.equal(x.learning.humanHold(B),false);
+  await client.ingest([
+   {key:{remoteJid:B,id:'a-hist',fromMe:true},message:{conversation:'Qual o papel?'},messageTimestamp:old}
+  ],'sincronizacao',{});
+  assert.equal(x.learning.examples(B).length,1);
+  assert.equal(x.learning.examples(B)[0].question,'Preciso de mil cartões');
+  assert.equal(x.learning.humanHold(B),false);
+ }finally{clearTimeout(client.memoryTimer);x.close();}
+});

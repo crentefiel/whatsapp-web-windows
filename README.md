@@ -2,7 +2,7 @@
 
 Programa de Windows para atender o WhatsApp da gráfica. Conecta com Baileys (não abre o WhatsApp Web dentro do app), guarda o histórico neste computador e aprende com as respostas que você mesmo envia.
 
-Versão atual: **0.4.5-beta.1**. O modo inicial é **Observação**: a IA não envia mensagem sozinha.
+Versão atual: **0.4.6-beta.1**. O modo inicial é **Observação**: a IA não envia mensagem sozinha.
 
 ## Instalar
 
@@ -14,7 +14,7 @@ O instalador Windows (NSIS) sai pelo GitHub Actions neste repositório, na aba A
 - A engrenagem abre em abas: **WhatsApp**, **Inteligência**, **Memória** e **Empresa**.
 - No modo **Sugestão**, o texto da IA fica fixo acima do campo de digitar, para você editar e clicar em **Aprovar e enviar**.
 - Dá para marcar conversas — o botão **Todos** pega a lista inteira, não só as que aparecem na tela — e apagar daqui. Isso tira a conversa e a memória desse cliente só neste computador. Não apaga no celular do cliente.
-- Na aba **Memória** dá para apagar exemplos marcados ou todos os exemplos do contato aberto. A IA deixa de usar o que foi apagado.
+- Na aba **Memória** dá para apagar exemplos marcados ou todos os exemplos do contato aberto. A IA deixa de usar o que foi apagado. A sua resposta entra na memória mesmo horas ou alguns dias depois (até 7 dias). Ao abrir o programa, ele relê o histórico que já está neste computador. Se o WhatsApp trocar o identificador do contato, os exemplos acompanham o número.
 - Na conversa, **Estou atendendo** faz a IA parar naquele contato até **Devolver para a IA**. Se o cliente pedir uma pessoa ou para apagar os dados, a IA para sozinha e avisa na tela. Nada é apagado sozinho.
 
 ## Modos da IA
