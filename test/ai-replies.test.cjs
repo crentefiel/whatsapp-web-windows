@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-const {AiSettings,AutoResponder,validBaseUrl}=require('../src/core/ai-replies.cjs');
+const {AiSettings,AutoResponder,validBaseUrl,automaticGate}=require('../src/core/ai-replies.cjs');
 const JID='5511999999999@s.whatsapp.net',SECOND='5511888888888@s.whatsapp.net';
 const fakeVault={
  isEncryptionAvailable:()=>true,
@@ -278,4 +278,26 @@ test('notify muito antigo é bloqueado, append e histórico não disparam respos
   assert.equal(ai.stats.scheduled,0);
   ai.stop();
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('trocar o modo cancela respostas pendentes sem travar o processo',()=>{
+ const ai=new AutoResponder({settings:{public:()=>({enabled:false,responseScope:'selected',allowedJids:[]})},
+  client:{},store:{},delayMs:5000});
+ ai.pending.set(JID,setTimeout(()=>{},60000));
+ ai.cancelPending();
+ assert.equal(ai.pending.size,0);
+});
+
+test('Automático não exige o interruptor se a API já está salva, e não liga sozinho sem chave ou contato',()=>{
+ const remote={enabled:false,baseUrl:'https://api.openai.com/v1',model:'gpt-4.1-mini',hasKey:true,responseScope:'all',allowedJids:[]};
+ assert.equal(automaticGate(remote).ok,true);
+ assert.equal(automaticGate(remote).enable,true);
+ assert.equal(automaticGate({...remote,enabled:true}).enable,false);
+ assert.equal(automaticGate({...remote,hasKey:false}).ok,false);
+ assert.equal(automaticGate({enabled:false,baseUrl:'http://127.0.0.1:11434/v1',model:'local',hasKey:false,responseScope:'all',allowedJids:[]}).ok,true);
+ const blocked=automaticGate({enabled:false,baseUrl:'https://api.openai.com/v1',model:'gpt',hasKey:true,responseScope:'selected',allowedJids:[]});
+ assert.equal(blocked.ok,false);
+ assert.equal(blocked.openIa,true);
+ assert.match(blocked.message,/Todos os contatos individuais|autorize um contato/);
+ assert.equal(automaticGate({...blocked,allowedJids:[JID],enabled:false,baseUrl:'https://api.openai.com/v1',model:'gpt',hasKey:true,responseScope:'selected'}).ok,true);
 });

@@ -1,0 +1,431 @@
+'use strict';
+const {isAllowedJid}=require('./messages.cjs');
+
+const MODES=Object.freeze(['observation','suggestion','automatic']);
+const LIMIT_REPLY=3000;
+const MINUTE=60000;
+const HOUR=60*MINUTE;
+const TURN_LOOKBACK=7*24*HOUR;
+function words(s){
+ return new Set(String(s||'').toLocaleLowerCase('pt-BR')
+   .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+   .match(/[a-z0-9]{2,}/g)?.filter(x=>!['de','da','do','em','ao','na','no','pra','para','com','que','uma','um','por','tem'].includes(x))||[]);
+}
+function similarity(a,b){
+ const x=words(a),y=words(b);
+ if(!x.size||!y.size)return 0;
+ let hits=0;for(const token of x)if(y.has(token))hits++;
+ return hits/Math.max(x.size,y.size);
+}
+function describeInbound(row){
+ const body=String(row?.body||'').trim();
+ if(!row||row.kind==='protocol'||row.kind==='reaction')return '';
+ if(row.kind==='text'||!row.kind)return body;
+ const label={image:'imagem',video:'vídeo',audio:'áudio',document:'documento',sticker:'figurinha'}[row.kind]||row.kind;
+ return body?`[${label}] ${body}`:`[${label} do cliente]`;
+}
+function hasPrice(text){return /\bR\$\s*\d|\b\d+(?:[.,]\d+)?\s*(?:reais|real)\b/i.test(text);}
+function asksForHuman(text){
+ const s=String(text||'').toLocaleLowerCase('pt-BR');
+ if(/\b(apaga|apagar|exclui|excluir|deleta|deletar|esquece|esquecer|remove|remover)\b[\s\S]{0,40}\b(meus dados|minhas mensagens|minha conversa|meu n[uú]mero)\b/.test(s))return 'dados';
+ if(/\b(quero|preciso)\s+(falar|conversar)\s+com\b/.test(s))return 'pessoa';
+ if(/\bfalar\s+com\s+(uma\s+)?(pessoa|atendente|humano|gente|algu[eé]m|o\s+dono|o\s+respons[aá]vel)\b/.test(s))return 'pessoa';
+ if(/\b(chama|chame|passa|passe)\s+(para|pra)\s+(uma\s+pessoa|um\s+atendente|um\s+humano|algu[eé]m)\b/.test(s))return 'pessoa';
+ if(/\bn[aã]o\s+quero\s+(falar\s+com\s+)?(um\s+)?(rob[oô]|bot|m[aá]quina)\b/.test(s))return 'pessoa';
+ if(/\b(atendente|pessoa)\s+(de\s+verdade|humano|real)\b/.test(s))return 'pessoa';
+ if(/\b(quero|vim)\s+reclamar\b/.test(s))return 'pessoa';
+ if(/\batendimento\s+humano\b/.test(s))return 'pessoa';
+ return '';
+}
+class LearningMemory{
+ constructor(store,changed=()=>{}){
+  this.store=store;this.db=store.db;this.changed=changed;
+  // Tabelas novas, nunca modifica nem apaga o histórico/credenciais existentes.
+  this.db.exec(`CREATE TABLE IF NOT EXISTS learning_state(id INTEGER PRIMARY KEY CHECK(id=1),
+    mode TEXT NOT NULL DEFAULT 'observation');
+   INSERT OR IGNORE INTO learning_state(id,mode) VALUES(1,'observation');
+   CREATE TABLE IF NOT EXISTS learning_examples(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,jid TEXT NOT NULL,question_id TEXT,
+    reply_id TEXT NOT NULL,question TEXT NOT NULL,reply TEXT NOT NULL,
+    reply_at INTEGER NOT NULL,status TEXT NOT NULL DEFAULT 'observed',
+    source TEXT NOT NULL DEFAULT 'whatsapp',
+    UNIQUE(jid,reply_id));
+   CREATE INDEX IF NOT EXISTS idx_learning_samples ON learning_examples(jid,reply_at DESC);
+   CREATE TABLE IF NOT EXISTS learning_rules(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,jid TEXT,content TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'draft',created_at INTEGER NOT NULL);
+   CREATE TABLE IF NOT EXISTS learning_suggestions(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,jid TEXT NOT NULL,question_id TEXT NOT NULL,
+    answer TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at INTEGER NOT NULL);
+   CREATE INDEX IF NOT EXISTS idx_learning_suggest ON learning_suggestions(jid,id DESC);
+   CREATE TABLE IF NOT EXISTS learning_bot_messages(
+    jid TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(jid,id));
+   CREATE TABLE IF NOT EXISTS learning_human_hold(
+    jid TEXT PRIMARY KEY,until_ms INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'timer',note TEXT NOT NULL DEFAULT '');
+   CREATE TABLE IF NOT EXISTS company_profile(
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    name TEXT NOT NULL DEFAULT '',
+    about TEXT NOT NULL DEFAULT '',
+    hours TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    catalog TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL DEFAULT 0);
+   INSERT OR IGNORE INTO company_profile(id) VALUES(1);`);
+  const holdCols=this.db.prepare('PRAGMA table_info(learning_human_hold)').all().map(c=>c.name);
+  if(!holdCols.includes('kind'))this.db.exec("ALTER TABLE learning_human_hold ADD COLUMN kind TEXT NOT NULL DEFAULT 'timer'");
+  if(!holdCols.includes('note'))this.db.exec("ALTER TABLE learning_human_hold ADD COLUMN note TEXT NOT NULL DEFAULT ''");
+  this.getModeStmt=this.db.prepare('SELECT mode FROM learning_state WHERE id=1');
+ }
+ mode(){return this.getModeStmt.get()?.mode||'observation';}
+ setMode(mode){
+  if(!MODES.includes(mode))throw Error('Modo de aprendizado inválido');
+  this.db.prepare('UPDATE learning_state SET mode=? WHERE id=1').run(mode);
+  this.changed('learning');return this.mode();
+ }
+ jid(jid){if(!isAllowedJid(jid))throw Error('Contato inválido');return this.store.resolveJid(jid);}
+ isBot(jid,id){return !!this.db.prepare('SELECT 1 AS ok FROM learning_bot_messages WHERE jid=? AND id=?').get(this.jid(jid),String(id||''));}
+ markBot(jid,id){
+  if(!id)return;
+  this.db.prepare('INSERT OR IGNORE INTO learning_bot_messages(jid,id) VALUES(?,?)').run(this.jid(jid),id);
+ }
+ humanHold(jid){return (this.db.prepare('SELECT until_ms FROM learning_human_hold WHERE jid=?').get(this.jid(jid))?.until_ms||0)>Date.now();}
+ holdInfo(jid){
+  const row=this.db.prepare('SELECT until_ms,kind,note FROM learning_human_hold WHERE jid=?').get(this.jid(jid));
+  if(!row||row.until_ms<=Date.now())return{active:false,manual:false,note:''};
+  return{active:true,manual:row.kind==='manual',note:row.note||'',until:row.until_ms};
+ }
+ heldJids(){
+  return this.db.prepare("SELECT jid FROM learning_human_hold WHERE until_ms>? AND kind='manual'").all(Date.now()).map(row=>row.jid);
+ }
+ pauseForHuman(jid,ms=10*MINUTE){
+  jid=this.jid(jid);
+  const current=this.holdInfo(jid);
+  this.db.prepare("UPDATE learning_suggestions SET status='stale' WHERE jid=? AND status='pending'").run(jid);
+  if(!(current.active&&current.manual)){
+   this.db.prepare(`INSERT INTO learning_human_hold(jid,until_ms,kind,note) VALUES(?,?,'timer','')
+     ON CONFLICT(jid) DO UPDATE SET until_ms=excluded.until_ms,kind='timer',note=''`).run(jid,Date.now()+ms);
+  }
+  this.changed('learning');
+ }
+ holdManual(jid,note='manual'){
+  jid=this.jid(jid);
+  const label=['pessoa','dados','preco','manual'].includes(note)?note:'manual';
+  const until=Date.now()+365*24*60*60*1000;
+  this.db.prepare(`INSERT INTO learning_human_hold(jid,until_ms,kind,note) VALUES(?,?,'manual',?)
+    ON CONFLICT(jid) DO UPDATE SET until_ms=excluded.until_ms,kind='manual',note=excluded.note`).run(jid,until,label);
+  this.db.prepare("UPDATE learning_suggestions SET status='stale' WHERE jid=? AND status IN('pending','sending')").run(jid);
+  this.changed('learning');
+  return this.holdInfo(jid);
+ }
+ releaseHold(jid){
+  this.db.prepare('DELETE FROM learning_human_hold WHERE jid=?').run(this.jid(jid));
+  this.changed('learning');
+  return{active:false,manual:false,note:''};
+ }
+ // Junta o que o cliente falou desde a sua resposta anterior, até 7 dias.
+ // A gráfica responde horas depois; a janela de 30 minutos deixava a memória vazia.
+ customerTurn(jid,replyAt){
+  const prev=this.db.prepare(`SELECT MAX(timestamp) AS t FROM messages
+    WHERE jid=? AND from_me=1 AND timestamp<?`).get(jid,replyAt)?.t||0;
+  const start=Math.max(Number(prev)||0,replyAt-TURN_LOOKBACK);
+  const rows=this.db.prepare(`SELECT id,kind,body FROM messages
+    WHERE jid=? AND from_me=0 AND timestamp<=? AND timestamp>?
+     AND kind NOT IN('protocol','reaction')
+    ORDER BY timestamp ASC,id ASC LIMIT 12`).all(jid,replyAt,start);
+  const parts=[];
+  let lastId=null;
+  for(const row of rows){
+    const line=describeInbound(row);
+    if(!line)continue;
+    parts.push(line);
+    lastId=row.id;
+  }
+  const text=parts.join('\n').slice(0,2000);
+  return text?{id:lastId,text}:null;
+ }
+ replyIsRecent(m){
+  return !Number.isFinite(m?.timestamp)||Date.now()-Number(m.timestamp)<HOUR;
+ }
+ // Grava o par pergunta/resposta. Não pausa a IA: duplicata e histórico antigo só aprendem.
+ captureReply(m,source='tempo_real'){
+  if(!m?.fromMe||m.type!=='text'||!String(m.text||'').trim()||!isAllowedJid(m.jid)||source==='historico')return false;
+  const jid=this.jid(m.jid);
+  if(this.isBot(jid,m.id)||/^🤖\s/.test(m.text))return false;
+  const turn=this.customerTurn(jid,m.timestamp);
+  if(!turn?.text)return false;
+  const result=this.db.prepare(`INSERT OR IGNORE INTO learning_examples
+   (jid,question_id,reply_id,question,reply,reply_at,status,source)
+   VALUES(?,?,?,?,?,?,'observed',?)`)
+   .run(jid,turn.id,m.id,turn.text.slice(0,2000),String(m.text).slice(0,LIMIT_REPLY),m.timestamp,source);
+  if(result.changes)this.changed('learning');
+  return result.changes>0;
+ }
+ recordHuman(m,source='tempo_real'){
+  const saved=this.captureReply(m,source);
+  if(!m?.fromMe||m.type!=='text'||!String(m.text||'').trim()||!isAllowedJid(m.jid)||source==='historico')return saved;
+  if(this.isBot(m.jid,m.id)||/^🤖\s/.test(m.text))return false;
+  if(this.replyIsRecent(m))this.pauseForHuman(m.jid);
+  return saved;
+ }
+ // Quando o WhatsApp troca o LID pelo número, a memória vai junto.
+ // Não mexe nas mensagens: isso continua no Store, que não tem estas tabelas.
+ adoptJid(from,to,options={}){
+  if(!isAllowedJid(from)||!isAllowedJid(to)||from===to)return false;
+  if(!from.endsWith('@lid')||!to.endsWith('@s.whatsapp.net'))return false;
+  this.db.exec('BEGIN');
+  try{
+   this.db.prepare(`INSERT OR IGNORE INTO learning_examples
+     (jid,question_id,reply_id,question,reply,reply_at,status,source)
+     SELECT ?,question_id,reply_id,question,reply,reply_at,status,source
+     FROM learning_examples WHERE jid=?`).run(to,from);
+   this.db.prepare('DELETE FROM learning_examples WHERE jid=?').run(from);
+   this.db.prepare('UPDATE learning_suggestions SET jid=? WHERE jid=?').run(to,from);
+   const holds=this.db.prepare('SELECT until_ms,kind,note FROM learning_human_hold WHERE jid IN(?,?)').all(from,to);
+   if(holds.length){
+    const best=holds.reduce((a,b)=>b.until_ms>a.until_ms||(b.until_ms===a.until_ms&&b.kind==='manual')?b:a);
+    this.db.prepare('DELETE FROM learning_human_hold WHERE jid IN(?,?)').run(from,to);
+    this.db.prepare('INSERT INTO learning_human_hold(jid,until_ms,kind,note) VALUES(?,?,?,?)')
+     .run(to,best.until_ms,best.kind||'timer',best.note||'');
+   }
+   this.db.prepare('INSERT OR IGNORE INTO learning_bot_messages(jid,id) SELECT ?,id FROM learning_bot_messages WHERE jid=?').run(to,from);
+   this.db.prepare('DELETE FROM learning_bot_messages WHERE jid=?').run(from);
+   this.db.prepare('UPDATE learning_rules SET jid=? WHERE jid=?').run(to,from);
+   this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+  if(!options.silent)this.changed('learning');
+  return true;
+ }
+ adoptAliases(){
+  let rows=[];
+  try{rows=this.db.prepare('SELECT lid,pn FROM jid_aliases').all();}catch{return 0;}
+  let moved=0;
+  for(const row of rows){
+   const pending=this.db.prepare('SELECT COUNT(*) AS n FROM learning_examples WHERE jid=?').get(row.lid)?.n||0;
+   if(this.adoptJid(row.lid,row.pn,{silent:true})&&pending)moved+=pending;
+  }
+  if(moved)this.changed('learning');
+  return moved;
+ }
+ // Importa exemplos de TODO o histórico local que o Baileys já salvou.
+ // Não envia dados à API nem promove hipóteses/preços para regras oficiais.
+ rebuild(){
+  const before=this.db.prepare('SELECT COUNT(*) AS n FROM learning_examples').get().n;
+  this.db.prepare(`INSERT OR IGNORE INTO learning_examples
+   (jid,question_id,reply_id,question,reply,reply_at,status,source)
+   SELECT a.jid,
+      (SELECT q.id FROM messages q WHERE q.jid=a.jid AND q.from_me=0
+       AND q.kind='text' AND q.body<>'' AND q.timestamp<=a.timestamp
+       AND q.timestamp>=a.timestamp-${TURN_LOOKBACK} ORDER BY q.timestamp DESC,q.id DESC LIMIT 1),
+      a.id,
+      (SELECT CASE
+         WHEN q.kind='text' THEN q.body
+         WHEN q.body<>'' THEN '['||q.kind||'] '||q.body
+         ELSE '['||q.kind||' do cliente]'
+       END FROM messages q WHERE q.jid=a.jid AND q.from_me=0
+       AND q.kind NOT IN('protocol','reaction')
+       AND q.timestamp<=a.timestamp AND q.timestamp>=a.timestamp-${TURN_LOOKBACK}
+       AND (q.kind<>'text' OR q.body<>'')
+       ORDER BY q.timestamp DESC,q.id DESC LIMIT 1),
+      substr(a.body,1,3000),a.timestamp,'observed','historico_local'
+   FROM messages a WHERE a.from_me=1 AND a.kind='text' AND a.body<>''
+    AND a.body NOT LIKE '🤖 %'
+    AND (a.jid GLOB '*@s.whatsapp.net' OR a.jid GLOB '*@lid')
+    AND NOT EXISTS(SELECT 1 FROM learning_bot_messages b WHERE b.jid=a.jid AND b.id=a.id)
+    AND EXISTS(SELECT 1 FROM messages q WHERE q.jid=a.jid AND q.from_me=0
+      AND q.kind NOT IN('protocol','reaction')
+      AND q.timestamp<=a.timestamp AND q.timestamp>=a.timestamp-${TURN_LOOKBACK}
+      AND (q.kind<>'text' OR q.body<>''))`).run();
+  const after=this.db.prepare('SELECT COUNT(*) AS n FROM learning_examples').get().n;
+  this.adoptAliases();
+  this.changed('learning');
+  return{imported:after-before,total:after};
+ }
+ examples(jid,limit=40){
+  return this.db.prepare(`SELECT id,jid,question,reply,reply_at,status,source FROM learning_examples
+    WHERE jid=? ORDER BY reply_at DESC,id DESC LIMIT ?`).all(this.jid(jid),Math.min(100,Math.max(1,limit)));
+ }
+ examplesPage(jid,page=1){
+  jid=this.jid(jid);
+  const size=8;
+  const total=this.db.prepare('SELECT COUNT(*) AS n FROM learning_examples WHERE jid=?').get(jid).n;
+  const pages=Math.max(1,Math.ceil(total/size)||1);
+  const current=Math.min(pages,Math.max(1,Math.floor(Number(page))||1));
+  const items=this.db.prepare(`SELECT id,jid,question,reply,reply_at,status,source FROM learning_examples
+    WHERE jid=? ORDER BY reply_at DESC,id DESC LIMIT ? OFFSET ?`).all(jid,size,(current-1)*size);
+  return{items,total,page:current,pages,size};
+ }
+ repairQuestions(){
+  const rows=this.db.prepare(`SELECT id,jid,reply_at,question FROM learning_examples WHERE status='observed'`).all();
+  const update=this.db.prepare(`UPDATE learning_examples SET question=? WHERE id=? AND status='observed'`);
+  let updated=0;
+  for(const row of rows){
+   const turn=this.customerTurn(row.jid,row.reply_at);
+   if(turn?.text&&turn.text!==row.question){update.run(turn.text,row.id);updated++;}
+  }
+  if(updated)this.changed('learning');
+  return{updated,checked:rows.length};
+ }
+ forgetContacts(jids){
+  if(!Array.isArray(jids)||!jids.length||jids.length>20000)throw Error('Selecione as conversas para apagar');
+  const seen=new Set(),unique=[];
+  for(const raw of jids){
+   const jid=this.jid(raw);
+   if(!seen.has(jid)){seen.add(jid);unique.push(jid);}
+  }
+  const tables=['learning_examples','learning_suggestions','learning_human_hold','learning_bot_messages','learning_rules'];
+  let removed=0;
+  this.db.exec('BEGIN');
+  try{
+   for(let i=0;i<unique.length;i+=400){
+    const group=unique.slice(i,i+400);
+    const marks=group.map(()=>'?').join(',');
+    for(const table of tables)removed+=this.db.prepare(`DELETE FROM ${table} WHERE jid IN (${marks})`).run(...group).changes;
+   }
+   this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+  this.changed('learning');
+  return{removed,contacts:unique.length};
+ }
+ deleteExamples(ids){
+  if(!Array.isArray(ids)||!ids.length||ids.length>5000)throw Error('Selecione os exemplos para apagar');
+  const unique=[];
+  for(const raw of ids){
+   const id=Number(raw);
+   if(Number.isInteger(id)&&id>0&&!unique.includes(id))unique.push(id);
+  }
+  if(!unique.length)throw Error('Nenhum exemplo válido');
+  let removed=0;
+  this.db.exec('BEGIN');
+  try{
+   for(let i=0;i<unique.length;i+=400){
+    const group=unique.slice(i,i+400);
+    const marks=group.map(()=>'?').join(',');
+    removed+=this.db.prepare(`DELETE FROM learning_examples WHERE id IN (${marks})`).run(...group).changes;
+   }
+   this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+  if(removed)this.changed('learning');
+  return{removed};
+ }
+ deleteContactExamples(jid){
+  jid=this.jid(jid);
+  let removed=0;
+  this.db.exec('BEGIN');
+  try{
+   removed+=this.db.prepare('DELETE FROM learning_examples WHERE jid=?').run(jid).changes;
+   removed+=this.db.prepare('DELETE FROM learning_suggestions WHERE jid=?').run(jid).changes;
+   this.db.exec('COMMIT');
+  }catch(e){this.db.exec('ROLLBACK');throw e;}
+  this.changed('learning');
+  return{removed,jid};
+ }
+ company(){
+  return this.db.prepare('SELECT name,about,hours,address,catalog,updated_at FROM company_profile WHERE id=1').get()
+   ||{name:'',about:'',hours:'',address:'',catalog:'',updated_at:0};
+ }
+ saveCompany(input={}){
+  const clip=(value,max)=>typeof value==='string'?value.trim().slice(0,max):'';
+  const row={
+   name:clip(input.name,120),about:clip(input.about,2000),hours:clip(input.hours,500),
+   address:clip(input.address,500),catalog:clip(input.catalog,8000)
+  };
+  this.db.prepare(`UPDATE company_profile SET name=?,about=?,hours=?,address=?,catalog=?,updated_at=? WHERE id=1`)
+   .run(row.name,row.about,row.hours,row.address,row.catalog,Date.now());
+  this.changed('learning');
+  return this.company();
+ }
+ companyBrief(){
+  const c=this.company();
+  const lines=[];
+  if(c.name)lines.push('Nome: '+c.name);
+  if(c.about)lines.push('Sobre: '+c.about);
+  if(c.hours)lines.push('Horário: '+c.hours);
+  if(c.address)lines.push('Endereço: '+c.address);
+  if(c.catalog)lines.push('Catálogo e preços informados pelo proprietário:\n'+c.catalog);
+  return lines.join('\n');
+ }
+ sampleUpdate(id,{reply,status}){
+  if(!Number.isInteger(id)||id<=0||!['approved','rejected','observed'].includes(status)||typeof reply!=='string'||!reply.trim()||reply.length>LIMIT_REPLY)throw Error('Correção de exemplo inválida');
+  const result=this.db.prepare('UPDATE learning_examples SET reply=?,status=? WHERE id=?').run(reply.trim(),status,id);
+  if(result.changes)this.changed('learning');
+  return result.changes>0;
+ }
+ rules(jid=null){return this.db.prepare(`SELECT id,jid,content,state,created_at FROM learning_rules
+   WHERE jid IS NULL OR jid=? ORDER BY created_at DESC,id DESC LIMIT 80`).all(jid?this.jid(jid):'',);}
+ addRule(content,jid=null){
+  if(typeof content!=='string'||!content.trim()||content.length>1000)throw Error('Regra inválida');
+  if(jid)jid=this.jid(jid);
+  const result=this.db.prepare("INSERT INTO learning_rules(jid,content,state,created_at) VALUES(?,?,'draft',?)").run(jid,content.trim(),Date.now());
+  this.changed('learning');return result.lastInsertRowid;
+ }
+ approveRule(id,approve){
+  if(!Number.isInteger(id)||id<1||typeof approve!=='boolean')throw Error('Regra inválida');
+  const result=this.db.prepare('UPDATE learning_rules SET state=? WHERE id=?').run(approve?'approved':'rejected',id);
+  if(result.changes)this.changed('learning');return result.changes>0;
+ }
+ // Agrega somente características de escrita, não compartilha falas de outro cliente.
+ globalStyle(){
+  const s=this.db.prepare(`SELECT COUNT(*) AS n,ROUND(AVG(LENGTH(reply))) AS mean_length,
+   SUM(CASE WHEN lower(reply) LIKE 'bom dia%' THEN 1 ELSE 0 END) AS good_morning,
+   SUM(CASE WHEN lower(reply) LIKE 'olá%' OR lower(reply) LIKE 'oi%' THEN 1 ELSE 0 END) AS greeting
+   FROM learning_examples WHERE status IN('observed','approved')`).get();
+  if(!s||s.n<5)return '';
+  return 'O atendente humano costuma responder com cerca de '+s.mean_length+
+    ' caracteres por mensagem. Em '+(s.greeting+s.good_morning)+' de '+s.n+
+    ' exemplos, começou com uma saudação. Imite a concisão e o tom cordial sem compartilhar fatos de outros clientes.';
+ }
+ context(jid,question){
+  jid=this.jid(jid);
+  // Nunca usar conversas de outros clientes como exemplos brutos.
+  const samples=this.db.prepare(`SELECT id,question,reply,status FROM learning_examples
+   WHERE jid=? AND status IN('observed','approved') ORDER BY reply_at DESC LIMIT 300`).all(jid);
+  const related=samples.map(x=>({...x,score:similarity(x.question,question)}))
+   .filter(x=>x.score>.10).sort((a,b)=>b.score-a.score).slice(0,4);
+  const approvedRules=this.rules(jid).filter(x=>x.state==='approved');
+  return{examples:related,rules:approvedRules,globalStyle:this.globalStyle(),score:related[0]?.score||0};
+ }
+ canAuto(jid,question){
+  const evidence=this.context(jid,question);
+  const supported=evidence.examples.some(x=>x.score>=.70);
+  return{ok:supported,reason:supported?'Exemplo humano semelhante':'Ainda sem exemplos humanos suficientemente semelhantes',evidence};
+ }
+ saveSuggestion(jid,questionId,answer){
+  jid=this.jid(jid);
+  if(!questionId||typeof answer!=='string'||!answer.trim()||answer.length>LIMIT_REPLY)throw Error('Sugestão inválida');
+  this.db.prepare("UPDATE learning_suggestions SET status='stale' WHERE jid=? AND status='pending'").run(jid);
+  const result=this.db.prepare("INSERT INTO learning_suggestions(jid,question_id,answer,status,created_at) VALUES(?,?,?,'pending',?)").run(jid,String(questionId),answer.trim(),Date.now());
+  this.changed('learning');return Number(result.lastInsertRowid);
+ }
+ suggestion(jid){return this.db.prepare("SELECT * FROM learning_suggestions WHERE jid=? AND status='pending' ORDER BY id DESC LIMIT 1").get(this.jid(jid))||null;}
+ beginSuggestion(id,jid){
+  jid=this.jid(jid);
+  if(!Number.isInteger(id)||id<1)throw Error('Sugestão inválida');
+  const result=this.db.prepare("UPDATE learning_suggestions SET status='sending' WHERE id=? AND jid=? AND status='pending'").run(id,jid);
+  if(!result.changes)throw Error('Sugestão já utilizada ou cancelada');
+  return true;
+ }
+ cancelSuggestionSend(id,jid){
+  jid=this.jid(jid);
+  const target=this.humanHold(jid)?'stale':'pending';
+  this.db.prepare("UPDATE learning_suggestions SET status=? WHERE id=? AND jid=? AND status='sending'").run(target,id,jid);
+  this.changed('learning');
+ }
+ finishSuggestion(id,jid,answer,status){
+  jid=this.jid(jid);
+  if(!Number.isInteger(id)||id<1||!['approved','rejected'].includes(status))throw Error('Sugestão inválida');
+  const s=this.db.prepare("SELECT * FROM learning_suggestions WHERE id=? AND jid=? AND status IN('pending','sending')").get(id,jid);
+  if(!s)throw Error('Sugestão não disponível, talvez tenha sido substituída');
+  if(status==='approved'&&(!answer||answer.length>LIMIT_REPLY))throw Error('Resposta inválida');
+  this.db.prepare("UPDATE learning_suggestions SET status=?,answer=? WHERE id=?").run(status,status==='approved'?answer:s.answer,id);
+  this.changed('learning');return s;
+ }
+ stats(){
+  const q=this.db.prepare("SELECT COUNT(*) AS n FROM learning_examples").get().n;
+  const approved=this.db.prepare("SELECT COUNT(*) AS n FROM learning_examples WHERE status='approved'").get().n;
+  const rules=this.db.prepare("SELECT COUNT(*) AS n FROM learning_rules WHERE state='approved'").get().n;
+  const contacts=this.db.prepare("SELECT COUNT(DISTINCT jid) AS n FROM learning_examples").get().n;
+  return{mode:this.mode(),examples:q,approved,approvedRules:rules,contacts};
+ }
+}
+module.exports={LearningMemory,similarity,hasPrice,asksForHuman,MODES};

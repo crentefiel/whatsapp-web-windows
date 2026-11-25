@@ -2,13 +2,36 @@
 const {app,BrowserWindow,ipcMain,dialog,protocol,net,shell,Menu,clipboard,safeStorage}=require('electron');
 const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('node:url');
 const {Store}=require('./core/database.cjs');
-const {AiSettings,AutoResponder}=require('./core/ai-replies.cjs');
+const {AiSettings,AutoResponder,automaticGate}=require('./core/ai-replies.cjs');
+const {LearningMemory}=require('./core/learning-memory.cjs');
 const {WhatsAppClient}=require('./core/wa-client.cjs');
 const {isAllowedJid}=require('./core/messages.cjs');
 const {hasSavedBaileysSession}=require('./core/session.cjs');
 const {resolveStoredMedia,contactFolder}=require('./core/media-files.cjs');
 protocol.registerSchemesAsPrivileged([{scheme:'sorriso',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
-let window=null,store=null,client=null,aiSettings=null,aiResponder=null;
+let window=null,store=null,client=null,aiSettings=null,aiResponder=null,learning=null;
+
+// Evita janela de erro para falhas de rede comuns do undici/Baileys (download de mídia abortado).
+process.on('uncaughtException',(err)=>{
+  const msg=String(err?.message||err||'').toLowerCase();
+  if(msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')||msg.includes('failed to fetch')||msg.includes('econnreset')||msg.includes('socket hang up')){
+    console.warn('[rede] Conexão de mídia interrompida (ignorada):',err.message);
+    return;
+  }
+  console.error('Uncaught Exception:',err);
+  if(window&&!window.isDestroyed()){
+    dialog.showErrorBox('Erro inesperado',String(err.message||err).slice(0,300));
+  }
+});
+process.on('unhandledRejection',(reason)=>{
+  const msg=String(reason?.message||reason||'').toLowerCase();
+  if(msg.includes('terminated')||msg.includes('aborted')||msg.includes('fetch failed')||msg.includes('failed to fetch')||msg.includes('econnreset')||msg.includes('socket hang up')){
+    console.warn('[rede] Promise de rede rejeitada (ignorada):',reason);
+    return;
+  }
+  console.error('Unhandled Rejection:',reason);
+});
+
 if(!app.requestSingleInstanceLock())app.quit();
 else{
  app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
@@ -26,8 +49,17 @@ async function startApp(){
  const dataDir=app.getPath('userData');store=new Store(dataDir);
  client=new WhatsAppClient({dataDir,store,changed});
  aiSettings=new AiSettings(dataDir,safeStorage);
- aiResponder=new AutoResponder({settings:aiSettings,client,store});
+ learning=new LearningMemory(store,changed);
+ aiResponder=new AutoResponder({settings:aiSettings,client,store,learning});
+ client.memory=learning;
  client.onIncoming=(m,source)=>aiResponder.handleIncoming(m,source);
+ client.onHuman=(m,source)=>{
+   if(source==='historico')return;
+   if(learning.isBot(m.jid,m.id)||/^🤖\s/.test(m.text))return;
+   learning.recordHuman(m,source);
+   const recent=!Number.isFinite(m.timestamp)||Date.now()-m.timestamp<=60*60*1000;
+   if(recent)aiResponder.handleHuman(m.jid);
+ };
  protocol.handle('sorriso',async request=>{
    const url=new URL(request.url);if(url.host!=='local')return new Response('Not found',{status:404});
    if(url.pathname.startsWith('/media/')){
@@ -58,13 +90,113 @@ async function startApp(){
  });
  api('whatsapp:aiDiagnostics',()=>({...aiResponder.stats}));
  api('whatsapp:aiTest',()=>aiResponder.testConnection());
+ api('whatsapp:learnStats',()=>learning.stats());
+ api('whatsapp:learnMode',async mode=>{
+   if(!['observation','suggestion','automatic'].includes(mode))throw Error('Modo inválido');
+   if(mode==='automatic'){
+     const gate=automaticGate(aiSettings.public());
+     if(!gate.ok)return{canceled:true,openIa:true,message:gate.message};
+     const choice=await dialog.showMessageBox(window,{
+       type:'warning',title:'Ativar respostas automáticas',
+       message:'Ativar o modo Automático com a memória aprendida?',
+       detail:'A IA poderá enviar respostas por conta própria apenas em conversas individuais permitidas, quando houver exemplos humanos semelhantes. Valores não aprovados serão bloqueados. Você poderá voltar ao modo Observação a qualquer momento.',
+       buttons:['Cancelar','Ativar Automático'],defaultId:0,cancelId:0,noLink:true
+     });
+     if(choice.response!==1)return{canceled:true,mode:learning.mode()};
+     if(gate.enable){
+       try{aiSettings.update({enabled:true});changed('ai');}
+       catch(e){return{canceled:true,openIa:true,message:e.message};}
+     }
+   }
+   aiResponder.cancelPending();
+   return{canceled:false,mode:learning.setMode(mode)};
+ });
+ api('whatsapp:learnHold',jid=>isAllowedJid(jid)?learning.holdInfo(jid):{active:false,manual:false,note:''});
+ api('whatsapp:learnHeld',()=>learning.heldJids());
+ api('whatsapp:learnTake',jid=>{if(!isAllowedJid(jid))throw Error('Contato inválido');return learning.holdManual(jid,'manual');});
+ api('whatsapp:learnRelease',jid=>{if(!isAllowedJid(jid))throw Error('Contato inválido');return learning.releaseHold(jid);});
+ api('whatsapp:learnRebuild',()=>learning.rebuild());
+ api('whatsapp:learnExamples',jid=>learning.examples(jid));
+ api('whatsapp:learnExamplesPage',(jid,page)=>learning.examplesPage(jid,page));
+ api('whatsapp:learnRepair',()=>learning.repairQuestions());
+ api('whatsapp:learnExampleUpdate',(id,reply,status)=>learning.sampleUpdate(id,{reply,status}));
+ api('whatsapp:learnDeleteExamples',async ids=>{
+  if(!Array.isArray(ids)||!ids.length)throw Error('Selecione os exemplos para apagar');
+  if(ids.length>1){
+   const choice=await dialog.showMessageBox(window,{
+    type:'warning',title:'Apagar exemplos da memória',
+    message:'Apagar '+ids.length+' exemplos da memória?',
+    detail:'A IA deixa de usar essas respostas. Isso não apaga a conversa no celular do cliente.',
+    buttons:['Cancelar','Apagar exemplos'],defaultId:0,cancelId:0,noLink:true
+   });
+   if(choice.response!==1)return{canceled:true};
+  }
+  const result=learning.deleteExamples(ids);
+  return{canceled:false,...result};
+ });
+ api('whatsapp:learnDeleteContactExamples',async jid=>{
+  if(!isAllowedJid(jid))throw Error('Contato inválido');
+  const choice=await dialog.showMessageBox(window,{
+   type:'warning',title:'Apagar exemplos deste contato',
+   message:'Apagar todos os exemplos deste contato?',
+   detail:'A IA deixa de responder com base no que aprendeu com ele. A conversa no celular do cliente continua.',
+   buttons:['Cancelar','Apagar exemplos'],defaultId:0,cancelId:0,noLink:true
+  });
+  if(choice.response!==1)return{canceled:true};
+  const result=learning.deleteContactExamples(jid);
+  return{canceled:false,...result};
+ });
+ api('whatsapp:learnRules',jid=>learning.rules(jid||null));
+ api('whatsapp:learnAddRule',(text,jid)=>Number(learning.addRule(text,jid||null)));
+ api('whatsapp:learnApproveRule',(id,approve)=>learning.approveRule(id,approve));
+ api('whatsapp:learnSuggestion',jid=>learning.mode()==='suggestion'?learning.suggestion(jid):null);
+ api('whatsapp:learnRejectSuggestion',(id,jid)=>Boolean(learning.finishSuggestion(id,jid,'','rejected')));
+ api('whatsapp:learnSendSuggestion',async(id,jid,answer)=>{
+   if(learning.mode()!=='suggestion')throw Error('Ative o modo Sugestão antes de enviar');
+   if(!isAllowedJid(jid)||typeof answer!=='string'||!answer.trim()||answer.length>3000)throw Error('Resposta inválida');
+   const pending=learning.suggestion(jid);
+   if(!pending||pending.id!==id)throw Error('Sugestão não está mais disponível');
+   learning.beginSuggestion(id,jid);
+   try{
+     const sent=await client.sendText(jid,answer.trim(),'human');
+     learning.finishSuggestion(id,jid,answer.trim(),'approved');
+     changed('learning');return sent;
+   }catch(e){learning.cancelSuggestionSend(id,jid);throw e;}
+ });
+ api('whatsapp:companyGet',()=>learning.company());
+ api('whatsapp:companySave',input=>learning.saveCompany(input||{}));
+ api('whatsapp:companyPull',async()=>{
+  const snap=await client.businessSnapshot();
+  const current=learning.company();
+  const pick=key=>String(snap[key]||'').trim()?snap[key]:current[key];
+  return learning.saveCompany({
+   name:pick('name')||current.name,about:pick('about'),hours:pick('hours'),
+   address:pick('address'),catalog:pick('catalog')
+  });
+ });
+ api('whatsapp:forgetChats',async jids=>{
+  if(!Array.isArray(jids)||!jids.length)throw Error('Selecione ao menos uma conversa');
+  const clean=jids.filter(isAllowedJid);
+  if(!clean.length)throw Error('Nenhuma conversa válida');
+  const choice=await dialog.showMessageBox(window,{
+   type:'warning',title:'Apagar conversas neste programa',
+   message:'Apagar '+clean.length+' conversa(s) e a memória desses clientes?',
+   detail:'Some da lista deste computador, como se fossem clientes novos. A IA esquece os exemplos deles. Isso não apaga a conversa no celular do cliente.',
+   buttons:['Cancelar','Apagar daqui'],defaultId:0,cancelId:0,noLink:true
+  });
+  if(choice.response!==1)return{canceled:true};
+  const memory=learning.forgetContacts(clean);
+  const chats=store.forgetChats(clean);
+  changed('conversas');changed('learning');
+  return{canceled:false,...chats,memoryRemoved:memory.removed};
+ });
  api('whatsapp:copyDiagnostics',()=>{
-   // Nunca copiar o QR Code nem credenciais/sessões. Apenas métricas locais.
    const {qr,...diagnostics}=client.status;
    const {enabled,allowedJids,responseScope}=aiSettings.public();
    const {sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}=aiResponder.stats;
+   const learned=learning.stats();
    clipboard.writeText(JSON.stringify({appVersion:app.getVersion(),...diagnostics,
-     ai:{enabled,responseScope,allowedContacts:allowedJids.length,sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger}},null,2));
+     ai:{enabled,responseScope,allowedContacts:allowedJids.length,sent,failed,skipped,observed,scheduled,apiCalls,lastError,lastSkip,lastTrigger,learningMode:learned.mode,learnedExamples:learned.examples}},null,2));
    return{copied:true};
  });
  api('whatsapp:start',()=>client.start());
@@ -80,6 +212,7 @@ async function startApp(){
    return client.repairSession();
  });
  api('whatsapp:conversations',()=>store.conversations());
+ api('whatsapp:conversationJids',()=>store.conversationJids());
  api('whatsapp:messages',jid=>{if(!isAllowedJid(jid))throw Error('Identificador inválido');return store.messages(jid);});
  api('whatsapp:sendText',(jid,text)=>client.sendText(jid,text));
  api('whatsapp:profile',jid=>client.profile(jid));
@@ -115,12 +248,14 @@ async function startApp(){
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  window.webContents.on('will-navigate',(event,url)=>{if(url!=='sorriso://local/index.html')event.preventDefault();});
  await window.loadURL('sorriso://local/index.html');
- // Na reabertura, retomar a sessão Baileys já autorizada, sem novo QR.
- // Se for a primeira instalação, o pareamento continua manual pelo botão.
  if(hasSavedBaileysSession(dataDir)){
    void client.start().catch(err=>{
      console.error('Falha ao retomar sessão Baileys:',err.message);
      client.reportError('retomar_sessao',err);
    });
  }
+ setTimeout(()=>{
+   try{learning.rebuild();learning.repairQuestions();}
+   catch(err){console.error('Falha ao reorganizar a memória:',err.message);}
+ },2000);
 }

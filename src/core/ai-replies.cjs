@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const {isAllowedJid}=require('./messages.cjs');
+const {hasPrice,asksForHuman}=require('./learning-memory.cjs');
 
 const DEFAULTS=Object.freeze({
   enabled:false,
@@ -11,6 +12,18 @@ const DEFAULTS=Object.freeze({
   responseScope:'selected', // 'all' é ativado apenas por escolha explícita
 });
 function isLocalUrl(url){return url.hostname==='localhost'||url.hostname==='127.0.0.1'||url.hostname==='[::1]';}
+function automaticGate(config){
+ const model=String(config?.model||'').trim();
+ let local=false;
+ try{local=isLocalUrl(new URL(String(config?.baseUrl||'')));}catch{local=false;}
+ if(!model||(!local&&!config?.hasKey)){
+  return{ok:false,openIa:true,message:'Salve o modelo e a chave da API na aba Inteligência antes do Automático. API no seu computador (localhost) não precisa de chave.'};
+ }
+ if(!config.enabled&&config.responseScope==='selected'&&!(config.allowedJids||[]).length){
+  return{ok:false,openIa:true,message:'Escolha "Todos os contatos individuais" ou autorize um contato antes do Automático. Nada foi ligado sozinho.'};
+ }
+ return{ok:true,enable:!config.enabled};
+}
 function validBaseUrl(value){
  if(typeof value!=='string'||value.length>250)throw Error('Endereço da API inválido');
  let u;try{u=new URL(value);}catch{throw Error('Endereço da API inválido');}
@@ -94,11 +107,21 @@ class AiSettings{
   return this.public();
  }
 }
+function pricesIn(text){
+ const values=[];
+ const regex=/(?:R\$\s*(\d+(?:\.\d{3})*(?:,\d{1,2})?)|(\d+(?:,\d{1,2})?)\s*reais?\b)/gi;
+ for(const match of String(text||'').matchAll(regex)){
+  const value=(match[1]||match[2]).replace(/\./g,'').replace(',','.');
+  const cents=Math.round(Number(value)*100);
+  if(Number.isFinite(cents)&&cents>=0)values.push(cents);
+ }
+ return values;
+}
 class AutoResponder{
- constructor({settings,client,store,fetchImpl=globalThis.fetch,delayMs=1500}){
-  this.settings=settings;this.client=client;this.store=store;this.fetch=fetchImpl;
+ constructor({settings,client,store,learning=null,fetchImpl=globalThis.fetch,delayMs=1500}){
+  this.settings=settings;this.client=client;this.store=store;this.learning=learning;this.fetch=fetchImpl;
   this.delayMs=delayMs;this.pending=new Map();this.running=new Set();
-  this.lastSent=new Map();this.hourly=new Map();this.seenIncoming=new Map();this.active=true;
+  this.lastSent=new Map();this.hourly=new Map();this.seenIncoming=new Map();this.latestIncoming=new Map();this.active=true;
   this.stats={sent:0,failed:0,skipped:0,observed:0,scheduled:0,apiCalls:0,lastTrigger:null,lastError:'',lastSkip:''};
  }
  allowed(jid){
@@ -133,13 +156,29 @@ class AutoResponder{
    this.seenIncoming.set(key,Date.now());
    while(this.seenIncoming.size>1000)this.seenIncoming.delete(this.seenIncoming.keys().next().value);
   }
-  if(!this.settings.public().enabled){this.skip('IA desativada');return;}
-  if(!this.allowed(jid)){this.skip('Contato sem autorização');return;}
+  const pedido=asksForHuman(m.text);
+  if(pedido&&this.learning){
+   this.learning.holdManual(jid,pedido);
+   this.skip(pedido==='dados'?'Cliente pediu para apagar os dados':'Cliente pediu uma pessoa');
+   return;
+  }
+  const mode=this.learning?.mode()||'automatic';
+  if(mode==='observation'){this.skip('Modo observação: sem resposta automática');return;}
+  const config=this.settings.public();
+  if(mode==='automatic'&&!config.enabled){this.skip('IA desativada');return;}
+  const scoped=config.responseScope==='all'||config.allowedJids.some(x=>(this.store.resolveJid?.(x)||x)===jid);
+  if(!scoped){this.skip('Contato sem autorização');return;}
+  if(this.learning?.humanHold(jid)){this.skip('Atendimento humano em andamento');return;}
+  if(mode==='suggestion'&&!config.model){this.skip('Modelo de IA não configurado');return;}
+  if(mode==='automatic'&&!this.allowed(jid)){this.skip('Contato sem autorização');return;}
+  this.latestIncoming.set(jid,m);
   // Agrupa mensagens próximas e evita respostas para cada fragmento.
   if(this.pending.has(jid))clearTimeout(this.pending.get(jid));
   const t=setTimeout(()=>{
    this.pending.delete(jid);
-   void this.reply(jid).catch(e=>{
+   const current=this.learning?.mode()||'automatic';
+   const operation=current==='suggestion'?this.suggest(jid):current==='automatic'?this.reply(jid):Promise.resolve();
+   void operation.catch(e=>{
     this.stats.failed++;this.stats.lastError=this.safeError(e);
    });
   },this.delayMs);
@@ -201,14 +240,62 @@ class AutoResponder{
   }
  }
  async generate(jid,config){
-  const history=this.store.messages(jid,12).filter(m=>m.kind==='text'&&m.body).map(m=>({
-   role:m.from_me?'assistant':'user',content:String(m.body).slice(0,1800)
+  const last=this.latestIncoming.get(jid);
+  const memory=this.learning?.context(jid,last?.text||'')||null;
+  const humanExamples=memory?.examples?.slice(0,4).map(x=>
+   'Cliente: '+x.question.slice(0,500)+'\nAtendente humano: '+x.reply.slice(0,900)).join('\n\n')||'';
+  const verifiedRules=memory?.rules?.map(x=>x.content.slice(0,500)).join('\n')||'';
+  const company=this.learning?.companyBrief?.()||'';
+  const additional=[
+   company?'Informações oficiais da empresa. Use somente estes fatos; não invente preço, prazo ou produto fora daqui:\n'+company:'',
+   'Consulte a memória do atendimento deste MESMO cliente. Exemplos observados mostram estilo, não comprovam preços nem políticas atuais.',
+   memory?.globalStyle||'',
+   verifiedRules?'Regras aprovadas pelo proprietário:\n'+verifiedRules:'',
+   humanExamples?'Exemplos de perguntas e respostas humanas deste cliente:\n'+humanExamples:'',
+   'Nunca invente preços, prazos ou medidas. Se faltar uma regra oficial, peça confirmação humana.'
+  ].filter(Boolean).join('\n\n');
+  const history=this.store.messages(jid,16).filter(m=>m.body&&!['protocol','reaction'].includes(m.kind)).map(m=>({
+   role:m.from_me?'assistant':'user',
+   content:(m.kind==='text'||!m.kind?String(m.body):'['+m.kind+'] '+m.body).slice(0,1800)
   }));
   if(!history.some(m=>m.role==='user'))return '';
-  return this.chatRequest(config,[{role:'system',content:config.systemPrompt},...history]);
+  return this.chatRequest(config,[{role:'system',content:config.systemPrompt+(additional?'\n\n'+additional:'')},...history]);
+ }
+ async suggest(jid){
+  if(!this.active||!this.learning||this.learning.mode()!=='suggestion'||this.running.has(jid)||this.learning.humanHold(jid))return;
+  if(this.client.status?.state!=='conectado')return;
+  const latest=this.latestIncoming.get(jid);
+  if(!latest?.id)return;
+  this.running.add(jid);
+  try{
+   const answer=await this.generate(jid,this.settings.public());
+   if(answer&&this.active&&this.learning.mode()==='suggestion'&&!this.learning.humanHold(jid)
+     &&this.latestIncoming.get(jid)?.id===latest.id){
+    this.learning.saveSuggestion(jid,latest.id,answer);
+   }
+  }catch(e){this.stats.failed++;this.stats.lastError=this.safeError(e);}
+  finally{this.running.delete(jid);}
+ }
+ handleHuman(jid){
+  jid=this.store.resolveJid?.(jid)||jid;
+  if(this.pending.has(jid))clearTimeout(this.pending.get(jid));
+  this.pending.delete(jid);
+  this.latestIncoming.delete(jid);
+ }
+ cancelPending(){
+  for(const t of this.pending.values())clearTimeout(t);
+  this.pending.clear();
  }
  async reply(jid){
   if(!this.active||this.running.has(jid)||!this.allowed(jid))return;
+  if(this.learning&&(this.learning.mode()!=='automatic'||this.learning.humanHold(jid))){
+   this.skip('Modo observação/sugestão ou atendimento humano');return;
+  }
+  const latest=this.latestIncoming.get(jid);
+  if(this.learning){
+   const check=this.learning.canAuto(jid,latest?.text||'');
+   if(!check.ok){this.skip(check.reason);return;}
+  }
   if(this.client.status?.state!=='conectado'){this.skip('WhatsApp desconectado');return;}
   const now=Date.now();
   if(now-(this.lastSent.get(jid)||0)<8000){this.skip('Intervalo mínimo entre respostas');return;}
@@ -221,7 +308,28 @@ class AutoResponder{
    const answer=await this.generate(jid,config);
    if(!answer){this.skip('Sem texto para responder');return;}
    if(!this.active||!this.allowed(jid)||this.client.status?.state!=='conectado')return;
-   await this.client.sendText(jid,'🤖 '+answer);
+   if(this.learning){
+    if(this.learning.mode()!=='automatic'||this.learning.humanHold(jid)
+       ||this.latestIncoming.get(jid)?.id!==latest?.id)return;
+    // Valor observado em uma conversa não vira preço oficial automaticamente.
+    if(hasPrice(answer)){
+     const amounts=pricesIn(answer);
+     const official=[
+       ...this.learning.context(jid,latest?.text||'').rules
+         .filter(r=>r.state==='approved').flatMap(r=>pricesIn(r.content)),
+       ...pricesIn(this.learning.companyBrief?.()||'')
+     ];
+     if(!amounts.length||!amounts.every(value=>official.includes(value))){
+      await this.client.sendText(jid,'🤖 Vou confirmar esse valor com a gráfica e já te retorno.','ai');
+      this.learning.holdManual(jid,'preco');
+      this.lastSent.set(jid,Date.now());this.hourly.set(jid,[...valid,Date.now()]);
+      this.stats.sent++;this.stats.lastError='';
+      this.stats.lastSkip='Preço não aprovado; pedi confirmação humana';
+      return;
+     }
+    }
+   }
+   await this.client.sendText(jid,'🤖 '+answer,'ai');
    this.lastSent.set(jid,Date.now());this.hourly.set(jid,[...valid,Date.now()]);
    this.stats.sent++;this.stats.lastError='';this.stats.lastSkip='';
   }catch(e){
@@ -234,4 +342,4 @@ class AutoResponder{
   this.pending.clear();
  }
 }
-module.exports={AiSettings,AutoResponder,validBaseUrl};
+module.exports={AiSettings,AutoResponder,validBaseUrl,automaticGate};

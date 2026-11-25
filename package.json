@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-web-windows",
-  "version": "0.3.3",
-  "description": "WhatsApp Desktop independente com Baileys, histórico SQLite e envio de mídias",
+  "version": "0.4.6-beta.1",
+  "description": "WhatsApp Desktop independente com Baileys, histórico SQLite, aprendizado por observação e IA",
   "private": true,
   "main": "src/main.cjs",
   "author": "Grafica do Sorriso",
@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/core/wa-client.cjs && node --check src/core/database.cjs && node --check src/core/messages.cjs && node --check src/core/media-files.cjs && node --check src/core/media-storage.cjs && node --check src/core/ai-replies.cjs && node --check src/core/session.cjs && node --check src/ui.js",
+    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/core/wa-client.cjs && node --check src/core/database.cjs && node --check src/core/messages.cjs && node --check src/core/media-files.cjs && node --check src/core/media-storage.cjs && node --check src/core/ai-replies.cjs && node --check src/core/learning-memory.cjs && node --check src/core/session.cjs && node --check src/ui.js",
     "package:windows": "electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {

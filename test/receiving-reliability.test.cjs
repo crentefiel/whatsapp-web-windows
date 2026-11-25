@@ -18,6 +18,58 @@ async function withClient(fn){
  finally{store.close();await fs.rm(folder,{force:true,recursive:true});}
 }
 
+test('mídia com link expirado pede o arquivo de novo ao celular e salva sem erro',async()=>withClient(async({store,client})=>{
+ let downloads=0,refresh=0;
+ const sock={updateMediaMessage:async()=>{refresh++;return{message:{imageMessage:{mimetype:'image/jpeg',fileLength:4,url:'https://mmg.whatsapp.net/novo'}}};}};
+ client.downloadMedia=async raw=>{
+  downloads++;
+  if(!raw.message?.imageMessage?.url){
+   const err=Error('Failed to fetch stream from https://mmg.whatsapp.net/velho');
+   err.output={statusCode:404};
+   throw err;
+  }
+  return Buffer.from([9,9,9,9]);
+ };
+ const foto={key:{remoteJid:PN,id:'foto-exp',fromMe:false},
+  message:{imageMessage:{caption:'foto',mimetype:'image/jpeg',fileLength:4}},messageTimestamp:1795000001};
+ await client.ingest([foto],'tempo_real',sock);
+ assert.equal(refresh,1);
+ assert.equal(downloads,2);
+ assert.equal(client.status.mediaErrors,0);
+ assert.ok(store.messages(PN).find(m=>m.id==='foto-exp').media_id);
+ assert.equal(client.status.detail,'');
+}));
+
+test('BAD_DECRYPT pede a mídia de novo e não coloca openssl no cartão de conexão',async()=>withClient(async({store,client})=>{
+ let downloads=0,refresh=0;
+ const sock={updateMediaMessage:async()=>{refresh++;return{message:{imageMessage:{mimetype:'image/jpeg',fileLength:4,url:'https://mmg.whatsapp.net/novo'}}};}};
+ client.downloadMedia=async raw=>{
+  downloads++;
+  if(!String(raw.message?.imageMessage?.url||'').includes('novo'))throw Error('error:1e000065:Cipher functions:OPENSSL_internal:BAD_DECRYPT');
+  return Buffer.from([1,2,3,4]);
+ };
+ const foto={key:{remoteJid:PN,id:'foto-cipher',fromMe:false},
+  message:{imageMessage:{caption:'foto',mimetype:'image/jpeg',fileLength:4}},messageTimestamp:1795000002};
+ await client.ingest([foto],'tempo_real',sock);
+ assert.equal(refresh,1);
+ assert.equal(downloads,2);
+ assert.equal(client.status.mediaErrors,0);
+ assert.equal(client.status.detail,'');
+ assert.ok(store.messages(PN).find(m=>m.id==='foto-cipher').media_id);
+}));
+
+test('se a chave da mídia não voltar, a nota fica amigável e fora do detalhe da conexão',async()=>withClient(async({client})=>{
+ const sock={updateMediaMessage:async()=>{throw Error('sem resposta do celular');}};
+ client.downloadMedia=async()=>{throw Error('error:1e000065:Cipher functions:OPENSSL_internal:BAD_DECRYPT');};
+ const foto={key:{remoteJid:PN,id:'foto-ruim',fromMe:false},
+  message:{imageMessage:{caption:'x',mimetype:'image/jpeg',fileLength:4}},messageTimestamp:1795000003};
+ await client.ingest([foto],'tempo_real',sock);
+ assert.equal(client.status.mediaErrors,1);
+ assert.equal(client.status.detail,'');
+ assert.match(client.status.lastMediaNote,/celular não reenviou/);
+ assert.doesNotMatch(client.status.lastMediaNote,/OPENSSL|BAD_DECRYPT/);
+}));
+
 test('salva textos de um lote mesmo se o download de imagem ficar bloqueado',async()=>withClient(async({folder,store,client,changes})=>{
  let release;
  const wait=new Promise(resolve=>{release=resolve;});

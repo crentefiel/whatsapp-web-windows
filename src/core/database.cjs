@@ -83,13 +83,40 @@ class Store {
     return row?.kind==='text'&&row.body?{conversation:row.body}:undefined;
   }
   photo(jid,url){this.db.prepare('INSERT INTO contacts(jid,photo) VALUES(?,?) ON CONFLICT(jid) DO UPDATE SET photo=excluded.photo').run(this.resolveJid(jid),url);}
-  conversations(limit=200){return this.db.prepare(`SELECT c.jid,c.name,c.photo,c.last_seen,
+  conversations(limit=500){return this.db.prepare(`SELECT c.jid,c.name,c.photo,c.last_seen,
     (SELECT body FROM messages WHERE jid=c.jid ORDER BY timestamp DESC,id DESC LIMIT 1) AS preview,
     (SELECT kind FROM messages WHERE jid=c.jid ORDER BY timestamp DESC,id DESC LIMIT 1) AS preview_kind,
     (SELECT COUNT(*) FROM messages WHERE jid=c.jid) AS count
     FROM contacts c WHERE (c.jid GLOB '*@s.whatsapp.net' OR c.jid GLOB '*@lid') ORDER BY c.last_seen DESC LIMIT ?`).all(limit);}
   messages(jid,limit=200){return this.db.prepare(`SELECT m.*,d.filename,d.mime,d.kind AS media_kind FROM messages m
     LEFT JOIN media d ON d.id=m.media_id WHERE m.jid=? ORDER BY m.timestamp DESC,m.id DESC LIMIT ?`).all(this.resolveJid(jid),limit).reverse();}
+  conversationJids(limit=20000){
+    const cap=Math.min(20000,Math.max(1,Math.floor(Number(limit))||20000));
+    return this.db.prepare(`SELECT jid FROM contacts
+      WHERE (jid GLOB '*@s.whatsapp.net' OR jid GLOB '*@lid')
+      ORDER BY last_seen DESC LIMIT ?`).all(cap).map(row=>row.jid);
+  }
+  forgetChats(jids){
+    if(!Array.isArray(jids)||!jids.length||jids.length>20000)throw Error('Selecione as conversas para apagar');
+    const seen=new Set(),unique=[];
+    for(const raw of jids){
+      const jid=this.resolveJid(raw);
+      if(isAllowedJid(jid)&&!seen.has(jid)){seen.add(jid);unique.push(jid);}
+    }
+    if(!unique.length)throw Error('Nenhuma conversa válida');
+    let messages=0,contacts=0;
+    this.db.exec('BEGIN');
+    try{
+      for(let i=0;i<unique.length;i+=400){
+        const group=unique.slice(i,i+400);
+        const marks=group.map(()=>'?').join(',');
+        messages+=this.db.prepare(`DELETE FROM messages WHERE jid IN (${marks})`).run(...group).changes;
+        contacts+=this.db.prepare(`DELETE FROM contacts WHERE jid IN (${marks})`).run(...group).changes;
+      }
+      this.db.exec('COMMIT');
+    }catch(e){this.db.exec('ROLLBACK');throw e;}
+    return{messages,contacts,jids:unique};
+  }
   close(){this.db.close();}
 }
 module.exports={Store};
